@@ -2,6 +2,33 @@ import os
 import sys
 sys.path.append(os.getcwd())
 
+# Windows: suppress noisy asyncio Proactor transport ConnectionResetError (WinError 10054).
+# This happens when the browser/websocket disconnects mid-task and is usually harmless.
+# Keep Proactor policy (it supports subprocess/pipes on Windows) but ignore that specific error.
+if sys.platform.startswith("win"):
+    try:
+        import asyncio
+
+        def _trellis_asyncio_exception_handler(loop, context):
+            exc = context.get("exception")
+            if isinstance(exc, ConnectionResetError) and getattr(exc, "winerror", None) == 10054:
+                return
+            loop.default_exception_handler(context)
+
+        class _TrellisWindowsProactorPolicy(asyncio.WindowsProactorEventLoopPolicy):
+            def new_event_loop(self):
+                loop = super().new_event_loop()
+                try:
+                    loop.set_exception_handler(_trellis_asyncio_exception_handler)
+                except Exception:
+                    pass
+                return loop
+
+        if hasattr(asyncio, "WindowsProactorEventLoopPolicy"):
+            asyncio.set_event_loop_policy(_TrellisWindowsProactorPolicy())
+    except Exception:
+        pass
+
 import argparse # Moved up for earlier access
 
 # -------------- CMD ARGS PARSE -----------------
@@ -257,7 +284,13 @@ def image_to_3d(
         )
     
     video_frames_color = render_utils.render_video(outputs['gaussian'][0], resolution=video_resolution, bg_color=(0,0,0), num_frames=video_num_frames)['color']
-    video_frames_geo = render_utils.render_video(outputs['mesh'][0], resolution=video_resolution, bg_color=(0,0,0), num_frames=video_num_frames)['normal']
+    try:
+        video_frames_geo = render_utils.render_video(outputs['mesh'][0], resolution=video_resolution, bg_color=(0,0,0), num_frames=video_num_frames)['normal']
+    except RuntimeError as e:
+        # nvdiffrast can occasionally crash with CUDA illegal memory access (e.g. error 700).
+        # Keep the generation usable by producing a placeholder geo panel instead of failing the whole request.
+        print(f"[WARN] Mesh video rendering failed; using placeholder geo frames. Error: {e}")
+        video_frames_geo = [np.zeros_like(frame) for frame in video_frames_color]
     
     combined_video_frames = [np.concatenate([video_frames_color[i], video_frames_geo[i]], axis=1) for i in range(len(video_frames_color))]
     

@@ -90,7 +90,26 @@ def render_frames(sample, extrinsics, intrinsics, options={}, colors_overwrite=N
             else:
                 rets['depth'].append(None)
         else:
-            res = renderer.render(sample, extr, intr)
+            try:
+                res = renderer.render(sample, extr, intr)
+            except RuntimeError as e:
+                msg = str(e)
+                is_cuda_nvdiffrast_error = (
+                    'Cuda error' in msg
+                    or 'cudaStreamSynchronize' in msg
+                    or 'nvdiffrast' in msg
+                    or 'RasterImpl.cpp' in msg
+                )
+                if is_cuda_nvdiffrast_error and getattr(renderer, 'rendering_options', {}).get('ssaa', 1) > 1:
+                    # Retry once with lower SSAA and a fresh context.
+                    renderer = MeshRenderer()
+                    renderer.rendering_options.resolution = options.get('resolution', 512)
+                    renderer.rendering_options.near = options.get('near', 1)
+                    renderer.rendering_options.far = options.get('far', 100)
+                    renderer.rendering_options.ssaa = 1
+                    res = renderer.render(sample, extr, intr)
+                else:
+                    raise
             if 'normal' not in rets: rets['normal'] = []
 
             if torch.isnan(res['normal']).any() or torch.isinf(res['normal']).any():
