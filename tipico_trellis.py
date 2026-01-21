@@ -9,7 +9,7 @@ if sys.platform.startswith("win"):
     try:
         import asyncio
         if hasattr(asyncio, "WindowsSelectorEventLoopPolicy"):
-            asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+            asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())  # pyright: ignore[reportAttributeAccessIssue]
     except Exception:
         pass
 
@@ -29,7 +29,7 @@ cmd_args = parser.parse_args()
 # Attention Backend Selection
 _xformers_available = False
 try:
-    import xformers
+    import xformers  # pyright: ignore[reportMissingImports]
     _xformers_available = True
 except ImportError:
     pass
@@ -50,16 +50,16 @@ else: # Default is flash-attn
 
 os.environ['SPCONV_ALGO'] = 'native' 
 
-import gradio as gr
-from gradio_litmodel3d import LitModel3D
+import gradio as gr  # pyright: ignore[reportMissingImports]
+from gradio_litmodel3d import LitModel3D  # pyright: ignore[reportMissingImports]
 
 import shutil
-from typing import *
-import torch
-import numpy as np
-import imageio
-from easydict import EasyDict as edict
-from PIL import Image
+from typing import *  # pyright: ignore[reportWildcardImportFromLibrary]
+import torch  # pyright: ignore[reportMissingImports]
+import numpy as np  # pyright: ignore[reportMissingImports]
+import imageio  # pyright: ignore[reportMissingImports]
+from easydict import EasyDict as edict  # pyright: ignore[reportMissingImports]
+from PIL import Image  # pyright: ignore[reportMissingImports]
 from trellis.pipelines import TrellisImageTo3DPipeline
 from trellis.representations import Gaussian, MeshExtractResult
 from trellis.utils import render_utils, postprocessing_utils
@@ -73,8 +73,8 @@ import platform
 import subprocess
 import re
 import glob as sistema_glob # Renamed to avoid conflict with local glob
-from filelock import FileLock # For robust file naming
-import rembg
+from filelock import FileLock  # pyright: ignore[reportMissingImports]  # For robust file naming
+import rembg  # pyright: ignore[reportMissingImports]
 
 # ------------------------------------------------
 
@@ -176,6 +176,11 @@ def preprocess_images(images: List[Tuple[Image.Image, str]]) -> List[Image.Image
     return processed_images
 
 def pack_state(gs: Gaussian, mesh: MeshExtractResult) -> dict:
+    assert gs._xyz is not None
+    assert gs._features_dc is not None
+    assert gs._scaling is not None
+    assert gs._rotation is not None
+    assert gs._opacity is not None
     return {
         'gaussian': {
             **gs.init_params,
