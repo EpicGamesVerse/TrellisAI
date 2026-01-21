@@ -1,31 +1,52 @@
-A One-click installer for Windows: [(Python 3.11, Cuda 11.8, Torch 2.1.2)](https://github.com/IgorAherne/trellis-stable-projectorz/releases/tag/latest)
+# TrellisAI (Tipico)
 
-Repository for integration with the [StableProjectorz](https://stableprojectorz.com/), a free AI-texturing tool.<br>
-Our Discord server: [here](https://discord.gg/aWbnX2qan2)
+Windows-friendly fork of TRELLIS with a Gradio UI entrypoint in `tipico_trellis.py`.
 
-I've added support for `float16` instead of `float32` and `int32` instead of `int64` within the pipeline.<br>
-This makes the whole algorithm fit into the VRAM of 8GB GPU cards, if they support half-precision.<br>
-I also added API support to generate via FastAPI, from c# etc.<br>
-FishWoWaters added Gradio support.<br>
+## Quickstart (Windows)
 
-In the process of integrating fork of Jonathan Clark, to remove dependencies that cause Trellis to be non-commercial
+1) Clone with submodules:
 
-For now my fork uses flexicubes fork  https://github.com/IgorAherne/flexicubes-stable-projectorz<br>
-I've changed it to use `int32` instead of `int64`, reducing memory by half during SLAT decoding stage.<br>
+```sh
+git clone --recurse-submodules https://github.com/EpicGamesVerse/TrellisAI.git
+cd TrellisAI
+```
 
-<h2>If you want to install manually:</h2>
+2) Create a venv (Python 3.11 recommended):
 
-1) use python 3.11
-2) install `code/requirements.txt`
-3) and then follow steps in `code/install.py` around line 130, method `install_dependencies()`
-4) you will need to pip install wheel files, find them in `code/whl` folder.
-5) Lastly, from inside the `code` folder, do `git submodule deinit -f --all` and then `git submodule update --init --recursive` to make sure flexicubes sub-repo is installed
-6) launch via `python main_gradio.py --precision half` or for api support via `python api_spz/main_api.py`
+```sh
+python -m venv .venv
+.\.venv\Scripts\activate
+python -m pip install -U pip
+```
+
+3) Install dependencies and local wheels:
+
+```sh
+python install.py
+```
+
+4) Download models into a local folder named `models` (so the UI can load them):
+
+```sh
+huggingface-cli download bigchu/trellis_ai --local-dir models --local-dir-use-symlinks False
+```
+
+5) Run the UI:
+
+```sh
+python tipico_trellis.py --precision fp16
+```
+
+## What you should keep in the README
+
+- Attribution to the upstream TRELLIS project and paper (below).
+- The license section(s) describing how the code/submodules are licensed.
+- The citation block (recommended by the upstream authors).
 
 
 
 <br>
-<h2>Original Trellis Repo description:</h2>
+<h2>Upstream TRELLIS description (reference)</h2>
 
 <br><br>
 <img src="assets/logo.webp" width="100%" align="center">
@@ -77,8 +98,8 @@ I've changed it to use `int32` instead of `int64`, reducing memory by half durin
 ### Installation Steps
 1. Clone the repo:
     ```sh
-    git clone --recurse-submodules https://github.com/microsoft/TRELLIS.git
-    cd TRELLIS
+    git clone --recurse-submodules https://github.com/EpicGamesVerse/TrellisAI.git
+    cd TrellisAI
     ```
 
 2. Install the dependencies:
@@ -120,14 +141,14 @@ We provide the following pretrained models:
 
 | Model | Description | #Params | Download |
 | --- | --- | --- | --- |
-| TRELLIS-image-large | Large image-to-3D model | 1.2B | [Download](https://huggingface.co/JeffreyXiang/TRELLIS-image-large) |
+| TRELLIS-image-large | Large image-to-3D model | 1.2B | [Download](https://huggingface.co/bigchu/trellis_ai) |
 | TRELLIS-text-base | Base text-to-3D model | 342M | Coming Soon |
 | TRELLIS-text-large | Large text-to-3D model | 1.1B | Coming Soon |
 | TRELLIS-text-xlarge | Extra-large text-to-3D model | 2.0B | Coming Soon |
 
 The models are hosted on Hugging Face. You can directly load the models with their repository names in the code:
 ```python
-TrellisImageTo3DPipeline.from_pretrained("JeffreyXiang/TRELLIS-image-large")
+TrellisImageTo3DPipeline.from_pretrained("bigchu/trellis_ai")
 ```
 
 If you prefer loading the model from local, you can download the model files from the links above and load the model with the folder path (folder structure should be maintained):
@@ -224,7 +245,7 @@ python app.py
 
 Then, you can access the demo at the address shown in the terminal.
 
-***The web demo is also available on [Hugging Face Spaces](https://huggingface.co/spaces/JeffreyXiang/TRELLIS)!***
+***Upstream demo (reference): https://huggingface.co/spaces/JeffreyXiang/TRELLIS***
 
 
 <!-- Dataset -->
