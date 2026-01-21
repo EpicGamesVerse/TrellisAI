@@ -14,7 +14,7 @@ if errorlevel 1 (
 
 REM ====== Config ======
 set "REPO_URL=https://github.com/EpicGamesVerse/TrellisAI"
-set "REPO_DIR=TRELLIS"
+set "REPO_DIR=trellisai"
 set "VENV_ACT=%REPO_DIR%\venv\Scripts\activate.bat"
 set "MODELS_DIR=%~dp0%REPO_DIR%\models"
 set "MODEL_REPO_ID=MonsterMMORPG/SECourses_Rock"
@@ -198,9 +198,9 @@ set "TMP_SH=%TEMP%\tipicoai_runpod_install_%RANDOM%%RANDOM%.sh"
     echo.
     echo cd /workspace
     echo.
-    echo git clone --recursive https://github.com/EpicGamesVerse/TrellisAI
+    echo git clone --recursive https://github.com/EpicGamesVerse/TrellisAI trellisai
     echo.
-    echo cd TRELLIS
+    echo cd trellisai
     echo.
     echo python -m venv venv
     echo.
@@ -276,9 +276,9 @@ set "TMP_SH=%TEMP%\tipicoai_massed_install_%RANDOM%%RANDOM%.sh"
     echo git lfs install
     echo sudo apt update --yes
     echo.
-    echo git clone --recursive https://github.com/EpicGamesVerse/TrellisAI
+    echo git clone --recursive https://github.com/EpicGamesVerse/TrellisAI trellisai
     echo.
-    echo cd TRELLIS
+    echo cd trellisai
     echo.
     echo python3 -m venv venv
     echo.
