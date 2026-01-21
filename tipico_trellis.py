@@ -8,24 +8,8 @@ sys.path.append(os.getcwd())
 if sys.platform.startswith("win"):
     try:
         import asyncio
-
-        def _trellis_asyncio_exception_handler(loop, context):
-            exc = context.get("exception")
-            if isinstance(exc, ConnectionResetError) and getattr(exc, "winerror", None) == 10054:
-                return
-            loop.default_exception_handler(context)
-
-        class _TrellisWindowsProactorPolicy(asyncio.WindowsProactorEventLoopPolicy):
-            def new_event_loop(self):
-                loop = super().new_event_loop()
-                try:
-                    loop.set_exception_handler(_trellis_asyncio_exception_handler)
-                except Exception:
-                    pass
-                return loop
-
-        if hasattr(asyncio, "WindowsProactorEventLoopPolicy"):
-            asyncio.set_event_loop_policy(_TrellisWindowsProactorPolicy())
+        if hasattr(asyncio, "WindowsSelectorEventLoopPolicy"):
+            asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
     except Exception:
         pass
 
