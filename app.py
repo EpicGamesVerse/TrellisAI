@@ -1,6 +1,15 @@
 import os
 import sys
 sys.path.append(os.getcwd())
+
+# Put caches next to the repo when possible (launcher can override)
+_BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+_MODELS_DIR = os.environ.get("HF_HOME", os.path.join(_BASE_DIR, "models"))
+os.environ.setdefault("HF_HOME", _MODELS_DIR)
+os.environ.setdefault("TRANSFORMERS_CACHE", _MODELS_DIR)
+os.environ.setdefault("HF_DATASETS_CACHE", _MODELS_DIR)
+os.environ.setdefault("TORCH_HOME", os.path.join(_MODELS_DIR, "torch"))
+
 os.environ['ATTN_BACKEND'] = 'xformers'
 os.environ['SPCONV_ALGO'] = 'native' 
 
@@ -31,7 +40,7 @@ def start_session(req: gr.Request):
     
 def end_session(req: gr.Request):
     user_dir = os.path.join(TMP_DIR, str(req.session_hash))
-    shutil.rmtree(user_dir)
+    shutil.rmtree(user_dir, ignore_errors=True)
 
 
 def preprocess_image(image: Image.Image) -> Image.Image:
@@ -80,7 +89,7 @@ def pack_state(gs: Gaussian, mesh: MeshExtractResult) -> dict:
     }
     
     
-def unpack_state(state: dict) -> Tuple[Gaussian, edict, str]:
+def unpack_state(state: dict) -> Tuple[Gaussian, edict]:
     gs = Gaussian(
         aabb=state['gaussian']['aabb'],
         sh_degree=state['gaussian']['sh_degree'],
@@ -403,6 +412,8 @@ with gr.Blocks(delete_cache=(600, 600)) as demo:
 
 # Launch the Gradio app
 if __name__ == "__main__":
-    pipeline = TrellisImageTo3DPipeline.from_pretrained("JeffreyXiang/TRELLIS-image-large")
+    local_models = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models")
+    model_id_or_path = local_models if os.path.isdir(local_models) else "JeffreyXiang/TRELLIS-image-large"
+    pipeline = TrellisImageTo3DPipeline.from_pretrained(model_id_or_path)
     pipeline.cuda()
     demo.launch()
