@@ -1179,7 +1179,16 @@ with gr.Blocks(theme=gr.themes.Soft(), delete_cache=(600, 600)) as demo:
 
 def initialize_pipeline(precision_arg="fp32", highvram=False): 
     global pipeline
-    pipeline = TrellisImageTo3DPipeline.from_pretrained("models")
+    try:
+        model_root = "models/trellis_ai" if os.path.isdir("models/trellis_ai") else "models"
+        pipeline = TrellisImageTo3DPipeline.from_pretrained(model_root)
+    except Exception as e:
+        print("\nERROR: Could not load TRELLIS model files from the local 'models' folder.")
+        print("- Run the launcher menu option: 3) Download / Update Models")
+        print("- If the Hugging Face repo is gated/private, authenticate first:")
+        print("  TrellisAI\\venv\\Scripts\\huggingface-cli.exe login")
+        print(f"\nOriginal error: {e}")
+        raise SystemExit(1)
     
     if precision_arg == "fp16":
         effective_precision = "half"

@@ -13,16 +13,16 @@ os.environ.setdefault("TORCH_HOME", os.path.join(_MODELS_DIR, "torch"))
 os.environ['ATTN_BACKEND'] = 'xformers'
 os.environ['SPCONV_ALGO'] = 'native' 
 
-import gradio as gr
-from gradio_litmodel3d import LitModel3D
+import gradio as gr # pyright: ignore[reportMissingImports]
+from gradio_litmodel3d import LitModel3D # pyright: ignore[reportMissingImports]
 
 import shutil
 from typing import *
-import torch
-import numpy as np
-import imageio
-from easydict import EasyDict as edict
-from PIL import Image
+import torch # pyright: ignore[reportMissingImports]
+import numpy as np # pyright: ignore[reportMissingImports]
+import imageio # pyright: ignore[reportMissingImports]
+from easydict import EasyDict as edict # pyright: ignore[reportMissingImports]
+from PIL import Image # pyright: ignore[reportMissingImports]
 from trellis.pipelines import TrellisImageTo3DPipeline
 from trellis.representations import Gaussian, MeshExtractResult
 from trellis.utils import render_utils, postprocessing_utils

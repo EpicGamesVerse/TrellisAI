@@ -1,4 +1,4 @@
-# TrellisAI (Tipico)
+# TrellisAI 
 
 Windows-friendly fork of TRELLIS with a Gradio UI entrypoint in `tipico_trellis.py`.
 

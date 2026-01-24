@@ -7,9 +7,9 @@ os.environ['SPCONV_ALGO'] = 'native'        # Can be 'native' or 'auto', default
                                             # 'auto' is faster but will do benchmarking at the beginning.
                                             # Recommended to set to 'native' if run only once.
 
-import numpy as np
-import imageio
-from PIL import Image
+import numpy as np # pyright: ignore[reportMissingImports]
+import imageio # pyright: ignore[reportMissingImports]
+from PIL import Image # pyright: ignore[reportMissingImports]
 from trellis.pipelines import TrellisImageTo3DPipeline
 from trellis.utils import render_utils
 

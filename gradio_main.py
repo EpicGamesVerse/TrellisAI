@@ -60,7 +60,8 @@ def create_demo(pipeline: TrellisImageTo3DPipeline):
 
 # Define a function to initialize the pipeline
 def initialize_pipeline(precision="full"):
-    pipeline = TrellisImageTo3DPipeline.from_pretrained("models")
+    model_root = "models/trellis_ai" if os.path.isdir("models/trellis_ai") else "models"
+    pipeline = TrellisImageTo3DPipeline.from_pretrained(model_root)
     # Apply precision settings. Reduce memory usage at the cost of numerical precision:
     print('')
     print(f"used precision: '{precision}'.  Loading...")
