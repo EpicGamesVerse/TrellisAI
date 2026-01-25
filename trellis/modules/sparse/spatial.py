@@ -1,4 +1,4 @@
-from typing import *
+from typing import List, Tuple, Union, cast
 import torch
 import torch.nn as nn
 from . import SparseTensor
@@ -30,7 +30,7 @@ class SparseDownsample(nn.Module):
 
         MAX = [coord[i+1].max().item() + 1 for i in range(DIM)]
         OFFSET = torch.cumprod(torch.tensor(MAX[::-1]), 0).tolist()[::-1] + [1]
-        code = sum([c * o for c, o in zip(coord, OFFSET)])
+        code = sum((c * o for c, o in zip(coord, OFFSET)), torch.zeros_like(coord[0]))
         code, idx = code.unique(return_inverse=True)
 
         new_feats = torch.scatter_reduce(
@@ -75,8 +75,11 @@ class SparseUpsample(nn.Module):
         idx = input.get_spatial_cache(f'upsample_{factor}_idx')
         if any([x is None for x in [new_coords, new_layout, idx]]):
             raise ValueError('Upsample cache not found. SparseUpsample must be paired with SparseDownsample.')
-        new_feats = input.feats[idx]
-        out = SparseTensor(new_feats, new_coords, input.shape, new_layout)
+        new_coords_t = cast(torch.Tensor, new_coords)
+        new_layout_t = cast(List[slice], new_layout)
+        idx_t = cast(torch.Tensor, idx)
+        new_feats = input.feats[idx_t]
+        out = SparseTensor(new_feats, new_coords_t, input.shape, new_layout_t)
         out._scale = tuple([s * f for s, f in zip(input._scale, factor)])
         out._spatial_cache = input._spatial_cache
         return out

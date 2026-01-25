@@ -9,6 +9,7 @@ from easydict import EasyDict as edict
 from functools import partial
 from subprocess import DEVNULL, call
 import numpy as np
+from typing import Any, cast
 from utils import sphere_hammersley_sequence
 
 
@@ -80,6 +81,7 @@ if __name__ == '__main__':
     parser.add_argument('--max_workers', type=int, default=8)
     opt = parser.parse_args(sys.argv[2:])
     opt = edict(vars(opt))
+    opt = cast(Any, opt)
 
     os.makedirs(os.path.join(opt.output_dir, 'renders_cond'), exist_ok=True)
     

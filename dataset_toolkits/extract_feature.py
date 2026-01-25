@@ -14,16 +14,18 @@ from easydict import EasyDict as edict
 from concurrent.futures import ThreadPoolExecutor
 from queue import Queue
 from torchvision import transforms
+import torch.nn as nn
 from PIL import Image
 
+from typing import Any, cast
 
 torch.set_grad_enabled(False)
 
 
-def get_data(frames, sha256):
+def get_data(frames, sha256, output_dir: str):
     with ThreadPoolExecutor(max_workers=16) as executor:
         def worker(view):
-            image_path = os.path.join(opt.output_dir, 'renders', sha256, view['file_path'])
+            image_path = os.path.join(output_dir, 'renders', sha256, view['file_path'])
             try:
                 image = Image.open(image_path)
             except:
@@ -67,12 +69,17 @@ if __name__ == '__main__':
     parser.add_argument('--world_size', type=int, default=1)
     opt = parser.parse_args()
     opt = edict(vars(opt))
+    opt_any = cast(Any, opt)
 
-    feature_name = opt.model
-    os.makedirs(os.path.join(opt.output_dir, 'features', feature_name), exist_ok=True)
+    output_dir: str = str(opt_any.output_dir)
+
+    feature_name = str(opt_any.model)
+    os.makedirs(os.path.join(output_dir, 'features', feature_name), exist_ok=True)
 
     # load model
-    dinov2_model = torch.hub.load('facebookresearch/dinov2', opt.model, verbose=False)
+    dinov2_model = cast(nn.Module, torch.hub.load('facebookresearch/dinov2', feature_name, verbose=False))
+    dinov2_model_any = cast(Any, dinov2_model)
+    num_register_tokens = int(getattr(dinov2_model_any, 'num_register_tokens', 0))
     dinov2_model.eval().cuda()
     transform = transforms.Compose([
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
@@ -80,31 +87,31 @@ if __name__ == '__main__':
     n_patch = 518 // 14
 
     # get file list
-    if os.path.exists(os.path.join(opt.output_dir, 'metadata.csv')):
-        metadata = pd.read_csv(os.path.join(opt.output_dir, 'metadata.csv'))
+    if os.path.exists(os.path.join(output_dir, 'metadata.csv')):
+        metadata = pd.read_csv(os.path.join(output_dir, 'metadata.csv'))
     else:
         raise ValueError('metadata.csv not found')
-    if opt.instances is not None:
-        with open(opt.instances, 'r') as f:
+    if opt_any.instances is not None:
+        with open(str(opt_any.instances), 'r') as f:
             instances = f.read().splitlines()
         metadata = metadata[metadata['sha256'].isin(instances)]
     else:
-        if opt.filter_low_aesthetic_score is not None:
-            metadata = metadata[metadata['aesthetic_score'] >= opt.filter_low_aesthetic_score]
+        if opt_any.filter_low_aesthetic_score is not None:
+            metadata = metadata[metadata['aesthetic_score'] >= float(opt_any.filter_low_aesthetic_score)]
         if f'feature_{feature_name}' in metadata.columns:
             metadata = metadata[metadata[f'feature_{feature_name}'] == False]
         metadata = metadata[metadata['voxelized'] == True]
         metadata = metadata[metadata['rendered'] == True]
 
-    start = len(metadata) * opt.rank // opt.world_size
-    end = len(metadata) * (opt.rank + 1) // opt.world_size
+    start = len(metadata) * int(opt_any.rank) // int(opt_any.world_size)
+    end = len(metadata) * (int(opt_any.rank) + 1) // int(opt_any.world_size)
     metadata = metadata[start:end]
     records = []
 
     # filter out objects that are already processed
     sha256s = list(metadata['sha256'].values)
     for sha256 in copy.copy(sha256s):
-        if os.path.exists(os.path.join(opt.output_dir, 'features', feature_name, f'{sha256}.npz')):
+        if os.path.exists(os.path.join(output_dir, 'features', feature_name, f'{sha256}.npz')):
             records.append({'sha256': sha256, f'feature_{feature_name}' : True})
             sha256s.remove(sha256)
 
@@ -115,14 +122,14 @@ if __name__ == '__main__':
             ThreadPoolExecutor(max_workers=8) as saver_executor:
             def loader(sha256):
                 try:
-                    with open(os.path.join(opt.output_dir, 'renders', sha256, 'transforms.json'), 'r') as f:
+                    with open(os.path.join(output_dir, 'renders', sha256, 'transforms.json'), 'r') as f:
                         metadata = json.load(f)
                     frames = metadata['frames']
                     data = []
-                    for datum in get_data(frames, sha256):
+                    for datum in get_data(frames, sha256, output_dir):
                         datum['image'] = transform(datum['image'])
                         data.append(datum)
-                    positions = utils3d.io.read_ply(os.path.join(opt.output_dir, 'voxels', f'{sha256}.ply'))[0]
+                    positions = utils3d.io.read_ply(os.path.join(output_dir, 'voxels', f'{sha256}.ply'))[0]
                     load_queue.put((sha256, data, positions))
                 except Exception as e:
                     print(f"Error loading data for {sha256}: {e}")
@@ -137,7 +144,7 @@ if __name__ == '__main__':
                     align_corners=False,
                 ).squeeze(2).permute(0, 2, 1).cpu().numpy()
                 pack['patchtokens'] = np.mean(pack['patchtokens'], axis=0).astype(np.float16)
-                save_path = os.path.join(opt.output_dir, 'features', feature_name, f'{sha256}.npz')
+                save_path = os.path.join(output_dir, 'features', feature_name, f'{sha256}.npz')
                 np.savez_compressed(save_path, **pack)
                 records.append({'sha256': sha256, f'feature_{feature_name}' : True})
                 
@@ -153,15 +160,15 @@ if __name__ == '__main__':
                 }
                 patchtokens_lst = []
                 uv_lst = []
-                for i in range(0, n_views, opt.batch_size):
-                    batch_data = data[i:i+opt.batch_size]
+                for i in range(0, n_views, int(opt_any.batch_size)):
+                    batch_data = data[i:i+int(opt_any.batch_size)]
                     bs = len(batch_data)
                     batch_images = torch.stack([d['image'] for d in batch_data]).cuda()
                     batch_extrinsics = torch.stack([d['extrinsics'] for d in batch_data]).cuda()
                     batch_intrinsics = torch.stack([d['intrinsics'] for d in batch_data]).cuda()
-                    features = dinov2_model(batch_images, is_training=True)
+                    features = dinov2_model_any(batch_images, is_training=True)
                     uv = utils3d.torch.project_cv(positions, batch_extrinsics, batch_intrinsics)[0] * 2 - 1
-                    patchtokens = features['x_prenorm'][:, dinov2_model.num_register_tokens + 1:].permute(0, 2, 1).reshape(bs, 1024, n_patch, n_patch)
+                    patchtokens = features['x_prenorm'][:, num_register_tokens + 1:].permute(0, 2, 1).reshape(bs, 1024, n_patch, n_patch)
                     patchtokens_lst.append(patchtokens)
                     uv_lst.append(uv)
                 patchtokens = torch.cat(patchtokens_lst, dim=0)
@@ -174,6 +181,6 @@ if __name__ == '__main__':
     except:
         print("Error happened during processing.")
         
-    records = pd.DataFrame.from_records(records)
-    records.to_csv(os.path.join(opt.output_dir, f'feature_{feature_name}_{opt.rank}.csv'), index=False)
+    records_df = pd.DataFrame.from_records(records)
+    records_df.to_csv(os.path.join(output_dir, f'feature_{feature_name}_{int(opt_any.rank)}.csv'), index=False)
         

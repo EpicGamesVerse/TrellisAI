@@ -2,6 +2,9 @@ import os
 import sys
 sys.path.append(os.getcwd())
 
+import importlib
+from typing import Any, cast
+
 # Windows: suppress noisy asyncio Proactor transport ConnectionResetError (WinError 10054).
 # This happens when the browser/websocket disconnects mid-task and is usually harmless.
 # Keep Proactor policy (it supports subprocess/pipes on Windows) but ignore that specific error.
@@ -29,7 +32,7 @@ cmd_args = parser.parse_args()
 # Attention Backend Selection
 _xformers_available = False
 try:
-    import xformers  # pyright: ignore[reportMissingImports]
+    importlib.import_module("xformers")
     _xformers_available = True
 except ImportError:
     pass
@@ -50,16 +53,17 @@ else: # Default is flash-attn
 
 os.environ['SPCONV_ALGO'] = 'native' 
 
-import gradio as gr  # pyright: ignore[reportMissingImports]
-from gradio_litmodel3d import LitModel3D  # pyright: ignore[reportMissingImports]
+import gradio as gr
+from gradio_litmodel3d import LitModel3D
 
 import shutil
 from typing import *  # pyright: ignore[reportWildcardImportFromLibrary]
-import torch  # pyright: ignore[reportMissingImports]
-import numpy as np  # pyright: ignore[reportMissingImports]
-import imageio  # pyright: ignore[reportMissingImports]
-from easydict import EasyDict as edict  # pyright: ignore[reportMissingImports]
-from PIL import Image  # pyright: ignore[reportMissingImports]
+import torch
+import numpy as np
+import imageio.v2 as imageio
+from imageio.typing import ArrayLike
+from easydict import EasyDict as edict
+from PIL import Image
 from trellis.pipelines import TrellisImageTo3DPipeline
 from trellis.representations import Gaussian, MeshExtractResult
 from trellis.utils import render_utils, postprocessing_utils
@@ -73,8 +77,8 @@ import platform
 import subprocess
 import re
 import glob as sistema_glob # Renamed to avoid conflict with local glob
-from filelock import FileLock  # pyright: ignore[reportMissingImports]  # For robust file naming
-import rembg  # pyright: ignore[reportMissingImports]
+from filelock import FileLock  # For robust file naming
+import rembg
 
 # ------------------------------------------------
 
@@ -171,8 +175,8 @@ def preprocess_image(image: Image.Image) -> Image.Image:
     return processed_image
 
 def preprocess_images(images: List[Tuple[Image.Image, str]]) -> List[Image.Image]:
-    images = [image[0] for image in images]
-    processed_images = [pipeline.preprocess_image(image) for image in images]
+    image_list = [pair[0] for pair in images]
+    processed_images = [pipeline.preprocess_image(img) for img in image_list]
     return processed_images
 
 def pack_state(gs: Gaussian, mesh: MeshExtractResult) -> dict:
@@ -196,7 +200,7 @@ def pack_state(gs: Gaussian, mesh: MeshExtractResult) -> dict:
         },
     }
     
-def unpack_state(state: dict) -> Tuple[Gaussian, edict]: 
+def unpack_state(state: dict) -> Tuple[Gaussian, MeshExtractResult]: 
     gs = Gaussian(
         aabb=state['gaussian']['aabb'],
         sh_degree=state['gaussian']['sh_degree'],
@@ -211,7 +215,7 @@ def unpack_state(state: dict) -> Tuple[Gaussian, edict]:
     gs._rotation = torch.tensor(state['gaussian']['_rotation'], device='cuda')
     gs._opacity = torch.tensor(state['gaussian']['_opacity'], device='cuda')
     
-    mesh = edict(
+    mesh = MeshExtractResult(
         vertices=torch.tensor(state['mesh']['vertices'], device='cuda'),
         faces=torch.tensor(state['mesh']['faces'], device='cuda'),
     )
@@ -302,7 +306,7 @@ def image_to_3d(
         # If output_filename_prefix is None, it means it's a single (1-shot) generation.
         actual_video_path, temp_reservation_path, video_filename_base_final = get_next_output_path_numeric(video_dir, "mp4")
 
-    imageio.mimsave(actual_video_path, combined_video_frames, fps=video_fps)
+    imageio.mimwrite(actual_video_path, cast(List[ArrayLike], combined_video_frames), fps=video_fps)
     if temp_reservation_path: # Only exists if get_next_output_path_numeric was called (i.e. not batch/N-gen with prefix)
         remove_temp_reservation_file(temp_reservation_path)
         
@@ -446,15 +450,15 @@ def prepare_multi_example() -> List[Image.Image]:
 
 
 def split_image(image: Image.Image) -> List[Image.Image]:
-    image = np.array(image)
-    alpha = image[..., 3]
+    image_arr = np.array(image)
+    alpha = image_arr[..., 3]
     alpha = np.any(alpha>0, axis=0)
     start_pos = np.where(~alpha[:-1] & alpha[1:])[0].tolist()
     end_pos = np.where(alpha[:-1] & ~alpha[1:])[0].tolist()
-    images = []
+    segments: List[Image.Image] = []
     for s, e in zip(start_pos, end_pos):
-        images.append(Image.fromarray(image[:, s:e+1]))
-    return [preprocess_image(image) for image in images]
+        segments.append(Image.fromarray(image_arr[:, s:e+1]))
+    return [preprocess_image(seg) for seg in segments]
 
 
 # --- Preset Functions ---
@@ -1200,7 +1204,7 @@ def initialize_pipeline(precision_arg="fp32", highvram=False):
     print('')
     print(f"Using precision: '{effective_precision}' (requested: '{precision_arg}'). Loading...")
     if effective_precision == "half": 
-        pipeline.to(torch.float16)
+        cast(Any, pipeline).to(torch.float16)
         if "image_cond_model" in pipeline.models:
              if hasattr(pipeline.models['image_cond_model'], 'half'):
                 pipeline.models['image_cond_model'].half()

@@ -9,6 +9,7 @@ from functools import partial
 import numpy as np
 import open3d as o3d
 import utils3d
+from typing import Any, cast
 
 
 def _voxelize(file, sha256, output_dir):
@@ -42,6 +43,7 @@ if __name__ == '__main__':
     parser.add_argument('--max_workers', type=int, default=None)
     opt = parser.parse_args(sys.argv[2:])
     opt = edict(vars(opt))
+    opt = cast(Any, opt)
 
     os.makedirs(os.path.join(opt.output_dir, 'voxels'), exist_ok=True)
 

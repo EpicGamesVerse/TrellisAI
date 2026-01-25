@@ -1,14 +1,25 @@
-from typing import *
+import importlib
+from typing import Any, List, Literal, Optional, Tuple, Union
+
 import numpy as np
+import numpy.typing as npt
 import torch
-import utils3d
-import nvdiffrast.torch as dr
-from tqdm import tqdm
+
+try:
+    utils3d = importlib.import_module("utils3d")
+except ModuleNotFoundError as e:
+    raise ModuleNotFoundError(
+        "Missing dependency 'utils3d'. Install the utils3d dependency (see setup.sh / requirements)."
+    ) from e
+
+from tqdm import tqdm 
 import trimesh
 import trimesh.visual
-import xatlas
 import pyvista as pv
-from pymeshfix import _meshfix
+try:
+    _meshfix: Any = importlib.import_module("pymeshfix._meshfix")
+except ModuleNotFoundError:
+    _meshfix = None
 import igraph
 import cv2
 from PIL import Image
@@ -188,6 +199,10 @@ def _fill_holes(
         if verbose:
             tqdm.write(f'Removed 0 faces by mincut')
             
+    if _meshfix is None:
+        raise ModuleNotFoundError(
+            "Missing dependency 'pymeshfix'. Install it (see setup.sh / requirements)."
+        )
     mesh = _meshfix.PyTMesh()
     mesh.load_array(verts.cpu().numpy(), faces.cpu().numpy())
     mesh.fill_small_boundaries(nbe=max_hole_nbe, refine=True)
@@ -198,8 +213,8 @@ def _fill_holes(
 
 
 def postprocess_mesh(
-    vertices: np.array,
-    faces: np.array,
+    vertices: npt.NDArray[Any],
+    faces: npt.NDArray[Any],
     simplify: bool = True,
     simplify_ratio: float = 0.9,
     fill_holes: bool = True,
@@ -241,9 +256,10 @@ def postprocess_mesh(
 
     # Remove invisible faces
     if fill_holes:
-        vertices, faces = torch.tensor(vertices).cuda(), torch.tensor(faces.astype(np.int32)).cuda()
-        vertices, faces = _fill_holes(
-            vertices, faces,
+        vertices_t = torch.tensor(vertices).cuda()
+        faces_t = torch.tensor(faces.astype(np.int32)).cuda()
+        vertices_t, faces_t = _fill_holes(
+            vertices_t, faces_t,
             max_hole_size=fill_holes_max_hole_size,
             max_hole_nbe=fill_holes_max_hole_nbe,
             resolution=fill_holes_resolution,
@@ -251,14 +267,12 @@ def postprocess_mesh(
             debug=debug,
             verbose=verbose,
         )
-        vertices, faces = vertices.cpu().numpy(), faces.cpu().numpy()
+        vertices, faces = vertices_t.cpu().numpy(), faces_t.cpu().numpy()
         if verbose:
             tqdm.write(f'After remove invisible faces: {vertices.shape[0]} vertices, {faces.shape[0]} faces')
 
     return vertices, faces
-
-
-def parametrize_mesh(vertices: np.array, faces: np.array):
+def parametrize_mesh(vertices: npt.NDArray[Any], faces: npt.NDArray[Any]) -> Tuple[npt.NDArray[Any], npt.NDArray[Any], npt.NDArray[Any]]:
     """
     Parametrize a mesh to a texture space, using xatlas.
 
@@ -267,6 +281,7 @@ def parametrize_mesh(vertices: np.array, faces: np.array):
         faces (np.array): Faces of the mesh. Shape (F, 3).
     """
 
+    xatlas = importlib.import_module("xatlas")
     vmapping, indices, uvs = xatlas.parametrize(vertices, faces)
 
     vertices = vertices[vmapping]
@@ -276,13 +291,13 @@ def parametrize_mesh(vertices: np.array, faces: np.array):
 
 
 def bake_texture(
-    vertices: np.array,
-    faces: np.array,
-    uvs: np.array,
-    observations: List[np.array],
-    masks: List[np.array],
-    extrinsics: List[np.array],
-    intrinsics: List[np.array],
+    vertices: npt.NDArray[Any],
+    faces: npt.NDArray[Any],
+    uvs: npt.NDArray[Any],
+    observations: List[npt.NDArray[Any]],
+    masks: List[npt.NDArray[Any]],
+    extrinsics: List[npt.NDArray[Any]],
+    intrinsics: List[npt.NDArray[Any]],
     texture_size: int = 2048,
     near: float = 0.1,
     far: float = 10.0,
@@ -310,11 +325,11 @@ def bake_texture(
         verbose (bool): Whether to print progress.
     """
     from .render_utils import render_multiview
-    vertices = torch.tensor(vertices).cuda()
-    faces = torch.tensor(faces.astype(np.int32)).cuda()
-    uvs = torch.tensor(uvs).cuda()
-    observations = [torch.tensor(obs / 255.0, dtype=torch.float16).cuda() for obs in observations]#float16 instead of float32, to fit into low VRAM gpus
-    masks = [torch.tensor(m>0).bool().cuda() for m in masks]
+    vertices_t = torch.tensor(vertices).cuda()
+    faces_t = torch.tensor(faces.astype(np.int32)).cuda()
+    uvs_t = torch.tensor(uvs).cuda()
+    observations_t = [torch.tensor(obs / 255.0, dtype=torch.float16).cuda() for obs in observations]  # float16 to fit low VRAM
+    masks_t = [torch.tensor(m > 0).bool().cuda() for m in masks]
     views = [utils3d.torch.extrinsics_to_view(torch.tensor(extr).cuda()) for extr in extrinsics]
     projections = [utils3d.torch.intrinsics_to_perspective(torch.tensor(intr).cuda(), near, far) for intr in intrinsics]
 
@@ -322,15 +337,20 @@ def bake_texture(
         texture = torch.zeros((texture_size * texture_size, 3), dtype=torch.float32).cuda()
         texture_weights = torch.zeros((texture_size * texture_size), dtype=torch.float32).cuda()
         rastctx = utils3d.torch.RastContext(backend='cuda')
-        for observation, view, projection in tqdm(zip(observations, views, projections), total=len(observations), disable=not verbose, desc='Texture baking (fast)'):
+        for observation, mask_src, view, projection in tqdm(
+            zip(observations_t, masks_t, views, projections),
+            total=len(observations_t),
+            disable=not verbose,
+            desc='Texture baking (fast)',
+        ):
             if cancel_event and cancel_event.is_set(): 
                 raise CancelledException(f"Cancelled the texture baking (fast).")
             with torch.no_grad():
                 rast = utils3d.torch.rasterize_triangle_faces(
-                    rastctx, vertices[None], faces, observation.shape[1], observation.shape[0], uv=uvs[None], view=view, projection=projection
+                    rastctx, vertices_t[None], faces_t, observation.shape[1], observation.shape[0], uv=uvs_t[None], view=view, projection=projection
                 )
                 uv_map = rast['uv'][0].detach().flip(0)
-                mask = rast['mask'][0].detach().bool() & masks[0]
+                mask = rast['mask'][0].detach().bool() & mask_src
             
             # nearest neighbor interpolation
             uv_map = (uv_map * texture_size).floor().long()
@@ -350,16 +370,16 @@ def bake_texture(
 
     elif mode == 'opt':
         rastctx = utils3d.torch.RastContext(backend='cuda')
-        observations = [observations.flip(0) for observations in observations]
-        masks = [m.flip(0) for m in masks]
+        observations_t = [obs.flip(0) for obs in observations_t]
+        masks_t = [m.flip(0) for m in masks_t]
         _uv = []
         _uv_dr = []
-        for observation, view, projection in tqdm(zip(observations, views, projections), total=len(views), disable=not verbose, desc='Texture baking (opt): UV'):
+        for observation, view, projection in tqdm(zip(observations_t, views, projections), total=len(views), disable=not verbose, desc='Texture baking (opt): UV'):
             if cancel_event and cancel_event.is_set(): 
                 raise CancelledException(f"Cancelled the texture baking (opt).")
             with torch.no_grad():
                 rast = utils3d.torch.rasterize_triangle_faces(
-                    rastctx, vertices[None], faces, observation.shape[1], observation.shape[0], uv=uvs[None], view=view, projection=projection
+                    rastctx, vertices_t[None], faces_t, observation.shape[1], observation.shape[0], uv=uvs_t[None], view=view, projection=projection
                 )
                 _uv.append(rast['uv'].detach())
                 _uv_dr.append(rast['uv_dr'].detach())
@@ -378,11 +398,12 @@ def bake_texture(
                    torch.nn.functional.l1_loss(texture[:, :, :-1, :], texture[:, :, 1:, :])
     
         total_steps = 2500
+        dr = importlib.import_module("nvdiffrast.torch")
         with tqdm(total=total_steps, disable=not verbose, desc='Texture baking (opt): optimizing') as pbar:
             for step in range(total_steps):
                 optimizer.zero_grad()
                 selected = np.random.randint(0, len(views))
-                uv, uv_dr, observation, mask = _uv[selected], _uv_dr[selected], observations[selected], masks[selected]
+                uv, uv_dr, observation, mask = _uv[selected], _uv_dr[selected], observations_t[selected], masks_t[selected]
                 render = dr.texture(texture, uv, uv_dr)[0]
                 loss = torch.nn.functional.l1_loss(render[mask], observation[mask])
                 if lambda_tv > 0:
@@ -397,7 +418,7 @@ def bake_texture(
                     raise CancelledException(f"Cancelled texture optimization at step {step}/{total_steps}.")
         texture = np.clip(texture[0].flip(0).detach().cpu().numpy() * 255, 0, 255).astype(np.uint8)
         mask = 1 - utils3d.torch.rasterize_triangle_faces(
-            rastctx, (uvs * 2 - 1)[None], faces, texture_size, texture_size
+            rastctx, (uvs_t * 2 - 1)[None], faces_t, texture_size, texture_size
         )['mask'][0].detach().cpu().numpy().astype(np.uint8)
         texture = cv2.inpaint(texture, mask, 3, cv2.INPAINT_TELEA)
     else:
@@ -473,8 +494,8 @@ def to_glb(
         baseColorTexture=texture,
         baseColorFactor=np.array([255, 255, 255, 255], dtype=np.uint8)
     )
-    mesh = trimesh.Trimesh(vertices, faces, visual=trimesh.visual.TextureVisuals(uv=uvs, material=material))
-    return mesh
+    glb_mesh = trimesh.Trimesh(vertices, faces, visual=trimesh.visual.TextureVisuals(uv=uvs, material=material))
+    return glb_mesh
 
 
 def simplify_gs(
@@ -493,6 +514,17 @@ def simplify_gs(
     from .render_utils import render_multiview
     if simplify <= 0:
         return gs
+
+    if gs._features_dc is None:
+        raise ValueError("Gaussian state is incomplete: _features_dc is None")
+    if gs._opacity is None:
+        raise ValueError("Gaussian state is incomplete: _opacity is None")
+    if gs._rotation is None:
+        raise ValueError("Gaussian state is incomplete: _rotation is None")
+    if gs._scaling is None:
+        raise ValueError("Gaussian state is incomplete: _scaling is None")
+    if gs._xyz is None:
+        raise ValueError("Gaussian state is incomplete: _xyz is None")
     
     # simplify
     observations, extrinsics, intrinsics = render_multiview(gs, resolution=1024, nviews=100)
@@ -508,7 +540,10 @@ def simplify_gs(
         })
     new_gs = Gaussian(**gs.init_params)
     new_gs._features_dc = gs._features_dc.clone()
-    new_gs._features_rest = gs._features_rest.clone() if gs._features_rest is not None else None
+    if gs._features_rest is not None:
+        new_gs._features_rest = torch.as_tensor(gs._features_rest, device='cuda').clone()
+    else:
+        new_gs._features_rest = None
     new_gs._opacity = torch.nn.Parameter(gs._opacity.clone())
     new_gs._rotation = torch.nn.Parameter(gs._rotation.clone())
     new_gs._scaling = torch.nn.Parameter(gs._scaling.clone())

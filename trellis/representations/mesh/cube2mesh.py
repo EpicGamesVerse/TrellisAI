@@ -1,4 +1,5 @@
 import torch
+from typing import Optional
 from ...modules.sparse import SparseTensor
 from easydict import EasyDict as edict
 from .utils_cube import *
@@ -20,9 +21,9 @@ class MeshExtractResult:
         self.success = (vertices.shape[0] != 0 and faces.shape[0] != 0)
 
         # training only
-        self.tsdf_v = None
-        self.tsdf_s = None
-        self.reg_loss = None
+        self.tsdf_v: Optional[torch.Tensor] = None
+        self.tsdf_s: Optional[torch.Tensor] = None
+        self.reg_loss: Optional[torch.Tensor] = None
         
     def comput_face_normals(self, verts, faces):
         i0 = faces[..., 0].long()
@@ -89,7 +90,7 @@ class SparseFeatures2Mesh:
             start += v['size']
         self.feats_channels = start
         
-    def get_layout(self, feats : torch.Tensor, name : str):
+    def get_layout(self, feats: torch.Tensor, name: str) -> Optional[torch.Tensor]:
         if name not in self.layouts:
             return None
         return feats[:, self.layouts[name]['range'][0]:self.layouts[name]['range'][1]].reshape(-1, *self.layouts[name]['shape'])
@@ -107,7 +108,15 @@ class SparseFeatures2Mesh:
         coords = cubefeats.coords[:, 1:]
         feats = cubefeats.feats
         
-        sdf, deform, color, weights = [self.get_layout(feats, name) for name in ['sdf', 'deform', 'color', 'weights']]
+        sdf = self.get_layout(feats, 'sdf')
+        deform = self.get_layout(feats, 'deform')
+        color = self.get_layout(feats, 'color')
+        weights = self.get_layout(feats, 'weights')
+
+        if sdf is None or deform is None or weights is None:
+            raise ValueError('Missing required mesh layout tensors (sdf/deform/weights).')
+        if self.use_color and color is None:
+            raise ValueError('Missing required mesh layout tensor (color).')
         sdf += self.sdf_bias
         v_attrs = [sdf, deform, color] if self.use_color else [sdf, deform]
         v_pos, v_attrs, reg_loss = sparse_cube2verts(coords, torch.cat(v_attrs, dim=-1), training=training)
@@ -136,7 +145,7 @@ class SparseFeatures2Mesh:
         if training:
             if mesh.success:
                 reg_loss += L_dev.mean() * 0.5
-            reg_loss += (weights[:,:20]).abs().mean() * 0.2
+            reg_loss += (weights[:, :20]).abs().mean() * 0.2
             mesh.reg_loss = reg_loss
             mesh.tsdf_v = get_defomed_verts(v_pos, v_attrs[:, 1:4], self.res)
             mesh.tsdf_s = v_attrs[:, 0]

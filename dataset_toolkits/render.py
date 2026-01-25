@@ -10,6 +10,7 @@ from functools import partial
 from subprocess import DEVNULL, call
 import numpy as np
 from utils import sphere_hammersley_sequence
+from typing import Any, cast
 
 
 BLENDER_LINK = 'https://download.blender.org/release/Blender3.0/blender-3.0.1-linux-x64.tar.xz'
@@ -76,6 +77,7 @@ if __name__ == '__main__':
     parser.add_argument('--max_workers', type=int, default=8)
     opt = parser.parse_args(sys.argv[2:])
     opt = edict(vars(opt))
+    opt = cast(Any, opt)
 
     os.makedirs(os.path.join(opt.output_dir, 'renders'), exist_ok=True)
     

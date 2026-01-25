@@ -1,4 +1,4 @@
-from typing import *
+from typing import Literal, Optional, Tuple
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -129,6 +129,8 @@ class MultiHeadAttention(nn.Module):
             elif self.attn_mode == "windowed":
                 raise NotImplementedError("Windowed attention is not yet implemented")
         else:
+            if context is None:
+                raise ValueError("context is required for cross-attention")
             Lkv = context.shape[1]
             q = self.to_q(x)
             kv = self.to_kv(context)

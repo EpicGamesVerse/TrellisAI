@@ -1,4 +1,7 @@
-from typing import *
+from __future__ import annotations
+
+from typing import Any, List, Optional, Union, overload, cast
+
 import torch
 from .. import SparseTensor
 from .. import DEBUG, ATTN
@@ -88,6 +91,12 @@ def sparse_scaled_dot_product_attention(q: torch.Tensor, k: SparseTensor, v: Spa
     ...
 
 def sparse_scaled_dot_product_attention(*args, **kwargs):
+    s: Optional[SparseTensor] = None
+    device: torch.device
+    q_seqlen: List[int]
+    kv_seqlen: List[int]
+    dense_shape: Optional[tuple[int, int, int]] = None  # (N, L, H) when output is dense
+
     arg_names_dict = {
         1: ['qkv'],
         2: ['q', 'kv'],
@@ -128,6 +137,7 @@ def sparse_scaled_dot_product_attention(*args, **kwargs):
             s = None
             N, L, H, C = q.shape
             q_seqlen = [L] * N
+            dense_shape = (N, L, H)
             q = q.reshape(N * L, H, C)   # [T_Q, H, C]
 
         if isinstance(kv, SparseTensor):
@@ -160,6 +170,7 @@ def sparse_scaled_dot_product_attention(*args, **kwargs):
             s = None
             N, L, H, CI = q.shape
             q_seqlen = [L] * N
+            dense_shape = (N, L, H)
             q = q.reshape(N * L, H, CI)  # [T_Q, H, Ci]
 
         if isinstance(k, SparseTensor):
@@ -186,30 +197,33 @@ def sparse_scaled_dot_product_attention(*args, **kwargs):
             assert k.shape[:2] == [1, sum(kv_seqlen)], f"SparseScaledDotProductSelfAttention: k shape mismatch"
             assert v.shape[:2] == [1, sum(kv_seqlen)], f"SparseScaledDotProductSelfAttention: v shape mismatch"
 
+    out: torch.Tensor
     if ATTN == 'xformers':
         if num_all_args == 1:
-            q, k, v = qkv.unbind(dim=1)
+            q, k, v = cast(torch.Tensor, qkv).unbind(dim=1)
         elif num_all_args == 2:
-            k, v = kv.unbind(dim=1)
-        q = q.unsqueeze(0)
-        k = k.unsqueeze(0)
-        v = v.unsqueeze(0)
+            k, v = cast(torch.Tensor, kv).unbind(dim=1)
+        q = cast(torch.Tensor, q).unsqueeze(0)
+        k = cast(torch.Tensor, k).unsqueeze(0)
+        v = cast(torch.Tensor, v).unsqueeze(0)
         mask = xops.fmha.BlockDiagonalMask.from_seqlens(q_seqlen, kv_seqlen)
-        out = xops.memory_efficient_attention(q, k, v, mask)[0]
+        out = cast(torch.Tensor, xops.memory_efficient_attention(q, k, v, mask)[0])
     elif ATTN == 'flash_attn':
         cu_seqlens_q = torch.cat([torch.tensor([0]), torch.cumsum(torch.tensor(q_seqlen), dim=0)]).int().to(device)
         if num_all_args in [2, 3]:
             cu_seqlens_kv = torch.cat([torch.tensor([0]), torch.cumsum(torch.tensor(kv_seqlen), dim=0)]).int().to(device)
         if num_all_args == 1:
-            out = flash_attn.flash_attn_varlen_qkvpacked_func(qkv, cu_seqlens_q, max(q_seqlen))
+            out = cast(torch.Tensor, flash_attn.flash_attn_varlen_qkvpacked_func(qkv, cu_seqlens_q, max(q_seqlen)))
         elif num_all_args == 2:
-            out = flash_attn.flash_attn_varlen_kvpacked_func(q, kv, cu_seqlens_q, cu_seqlens_kv, max(q_seqlen), max(kv_seqlen))
+            out = cast(torch.Tensor, flash_attn.flash_attn_varlen_kvpacked_func(q, kv, cu_seqlens_q, cu_seqlens_kv, max(q_seqlen), max(kv_seqlen)))
         elif num_all_args == 3:
-            out = flash_attn.flash_attn_varlen_func(q, k, v, cu_seqlens_q, cu_seqlens_kv, max(q_seqlen), max(kv_seqlen))
+            out = cast(torch.Tensor, flash_attn.flash_attn_varlen_func(q, k, v, cu_seqlens_q, cu_seqlens_kv, max(q_seqlen), max(kv_seqlen)))
     else:
         raise ValueError(f"Unknown attention module: {ATTN}")
     
     if s is not None:
         return s.replace(out)
-    else:
-        return out.reshape(N, L, H, -1)
+    if dense_shape is None:
+        raise RuntimeError("Dense output shape is unknown")
+    N, L, H = dense_shape
+    return out.reshape(N, L, H, -1)

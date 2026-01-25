@@ -1,7 +1,14 @@
 import argparse, sys, os, math, re, glob
-from typing import *
-import bpy
-from mathutils import Vector, Matrix
+import importlib
+from typing import Any, Callable, Dict, Tuple, cast
+
+try:
+    bpy = importlib.import_module("bpy")
+    _mathutils = importlib.import_module("mathutils")
+    Vector = cast(Any, getattr(_mathutils, "Vector"))
+    Matrix = cast(Any, getattr(_mathutils, "Matrix"))
+except Exception as e:
+    raise ImportError("This script must be run inside Blender (missing bpy/mathutils)") from e
 import numpy as np
 import json
 import glob
@@ -234,9 +241,8 @@ def load_object(object_path: str) -> None:
         addon_name = "io_scene_usdz"
         bpy.ops.preferences.addon_enable(module=addon_name)
         # import the usdz
-        from io_scene_usdz.import_usdz import import_usdz
-
-        import_usdz(context, filepath=object_path, materials=True, animations=True)
+        import_usdz = getattr(importlib.import_module("io_scene_usdz.import_usdz"), "import_usdz")
+        import_usdz(bpy.context, filepath=object_path, materials=True, animations=True)
         return None
 
     # load from existing import functions
@@ -339,7 +345,7 @@ def triangulate_meshes() -> None:
     bpy.ops.object.mode_set(mode="OBJECT")
     bpy.ops.object.select_all(action="DESELECT")
 
-def scene_bbox() -> Tuple[Vector, Vector]:
+def scene_bbox() -> Tuple[Any, Any]:
     """Returns the bounding box of the scene.
 
     Taken from Shap-E rendering script
@@ -363,7 +369,7 @@ def scene_bbox() -> Tuple[Vector, Vector]:
         raise RuntimeError("no objects in scene to compute bounding box for")
     return Vector(bbox_min), Vector(bbox_max)
 
-def normalize_scene() -> Tuple[float, Vector]:
+def normalize_scene() -> Tuple[float, Any]:
     """Normalizes the scene by scaling and translating it to fit in a unit cube centered
     at the origin.
 
@@ -400,7 +406,7 @@ def normalize_scene() -> Tuple[float, Vector]:
     
     return scale, offset
 
-def get_transform_matrix(obj: bpy.types.Object) -> list:
+def get_transform_matrix(obj: Any) -> list:
     pos, rt, _ = obj.matrix_world.decompose()
     rt = rt.to_matrix()
     matrix = []

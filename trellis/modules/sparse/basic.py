@@ -1,8 +1,10 @@
-from typing import *
+from __future__ import annotations
+
+from typing import Any, Callable, Dict, List, Optional, Union, overload, cast
 import torch
 import torch.nn as nn
 from . import BACKEND, DEBUG
-SparseTensorData = None # Lazy import
+SparseTensorData: Any = None  # Lazy import
 
 
 __all__ = [
@@ -30,10 +32,23 @@ class SparseTensor:
     - Coords should be in [0, 1023]
     """
     @overload
-    def __init__(self, feats: torch.Tensor, coords: torch.Tensor, shape: Optional[torch.Size] = None, layout: Optional[List[slice]] = None, **kwargs): ...
+    def __init__(
+        self,
+        feats: torch.Tensor,
+        coords: torch.Tensor,
+        shape: Optional[torch.Size] = None,
+        layout: Optional[List[slice]] = None,
+        **kwargs: Any,
+    ) -> None: ...
 
     @overload
-    def __init__(self, data, shape: Optional[torch.Size] = None, layout: Optional[List[slice]] = None, **kwargs): ...
+    def __init__(
+        self,
+        data: Any,
+        shape: Optional[torch.Size] = None,
+        layout: Optional[List[slice]] = None,
+        **kwargs: Any,
+    ) -> None: ...
 
     def __init__(self, *args, **kwargs):
         # Lazy import of sparse tensor backend
@@ -44,6 +59,10 @@ class SparseTensor:
                 SparseTensorData = importlib.import_module('torchsparse').SparseTensor
             elif BACKEND == 'spconv':
                 SparseTensorData = importlib.import_module('spconv.pytorch').SparseConvTensor
+        if SparseTensorData is None:
+            raise RuntimeError(f"Sparse backend '{BACKEND}' is not available")
+
+        self.data: Any
                 
         method_id = 0
         if len(args) != 0:
@@ -65,6 +84,11 @@ class SparseTensor:
             if 'layout' in kwargs:
                 layout = kwargs['layout']
                 del kwargs['layout']
+
+            if not isinstance(feats, torch.Tensor) or not isinstance(coords, torch.Tensor):
+                raise TypeError("SparseTensor(feats, coords, ...) requires torch.Tensor inputs")
+            feats = cast(torch.Tensor, feats)
+            coords = cast(torch.Tensor, coords)
 
             if shape is None:
                 shape = self.__cal_shape(feats, coords)
@@ -94,10 +118,10 @@ class SparseTensor:
             if layout is None:
                 layout = self.__cal_layout(self.coords, shape[0])
 
-        self._shape = shape
-        self._layout = layout
+        self._shape = cast(torch.Size, shape)
+        self._layout = cast(List[slice], layout)
         self._scale = kwargs.get('scale', (1, 1, 1))
-        self._spatial_cache = kwargs.get('spatial_cache', {})
+        self._spatial_cache: Dict[str, Dict[str, Any]] = kwargs.get('spatial_cache', {})
 
         if DEBUG:
             try:
@@ -114,13 +138,13 @@ class SparseTensor:
                 print(f"- Coords: {self.coords}")
                 raise e
         
-    def __cal_shape(self, feats, coords):
+    def __cal_shape(self, feats: torch.Tensor, coords: torch.Tensor) -> torch.Size:
         shape = []
         shape.append(coords[:, 0].max().item() + 1)
         shape.extend([*feats.shape[1:]])
         return torch.Size(shape)
     
-    def __cal_layout(self, coords, batch_size):
+    def __cal_layout(self, coords: torch.Tensor, batch_size: int) -> List[slice]:
         seq_len = torch.bincount(coords[:, 0], minlength=batch_size)
         offset = torch.cumsum(seq_len, dim=0) 
         layout = [slice((offset[i] - seq_len[i]).item(), offset[i].item()) for i in range(batch_size)]
@@ -143,6 +167,7 @@ class SparseTensor:
             return self.data.F
         elif BACKEND == 'spconv':
             return self.data.features
+        raise ValueError(f"Unknown BACKEND: {BACKEND}")
     
     @feats.setter
     def feats(self, value: torch.Tensor):
@@ -157,6 +182,7 @@ class SparseTensor:
             return self.data.C
         elif BACKEND == 'spconv':
             return self.data.indices
+        raise ValueError(f"Unknown BACKEND: {BACKEND}")
         
     @coords.setter
     def coords(self, value: torch.Tensor):
@@ -232,6 +258,7 @@ class SparseTensor:
             return self.data.dense()
         elif BACKEND == 'spconv':
             return self.data.dense()
+        raise ValueError(f"Unknown BACKEND: {BACKEND}")
 
     def reshape(self, *shape) -> 'SparseTensor':
         new_feats = self.feats.reshape(self.feats.shape[0], *shape)
@@ -241,6 +268,10 @@ class SparseTensor:
         return sparse_unbind(self, dim)
 
     def replace(self, feats: torch.Tensor, coords: Optional[torch.Tensor] = None) -> 'SparseTensor':
+        global SparseTensorData
+        if SparseTensorData is None:
+            raise RuntimeError("SparseTensorData is not initialized")
+
         new_shape = [self.shape[0]]
         new_shape.extend(feats.shape[1:])
         if BACKEND == 'torchsparse':
@@ -302,19 +333,20 @@ class SparseTensor:
     def __neg__(self) -> 'SparseTensor':
         return self.replace(-self.feats)
     
-    def __elemwise__(self, other: Union[torch.Tensor, 'SparseTensor'], op: callable) -> 'SparseTensor':
+    def __elemwise__(self, other: Union[torch.Tensor, 'SparseTensor', float], op: Callable[[torch.Tensor, Any], torch.Tensor]) -> 'SparseTensor':
+        other_sparse: Optional[SparseTensor] = other if isinstance(other, SparseTensor) else None
         if isinstance(other, torch.Tensor):
             try:
                 other = torch.broadcast_to(other, self.shape)
                 other = sparse_batch_broadcast(self, other)
             except:
                 pass
-        if isinstance(other, SparseTensor):
-            other = other.feats
+        if other_sparse is not None:
+            other = other_sparse.feats
         new_feats = op(self.feats, other)
         new_tensor = self.replace(new_feats)
-        if isinstance(other, SparseTensor):
-            new_tensor._spatial_cache = self.__merge_sparse_cache(other)
+        if other_sparse is not None:
+            new_tensor._spatial_cache = self.__merge_sparse_cache(other_sparse)
         return new_tensor
 
     def __add__(self, other: Union[torch.Tensor, 'SparseTensor', float]) -> 'SparseTensor':
@@ -405,7 +437,11 @@ def sparse_batch_broadcast(input: SparseTensor, other: torch.Tensor) -> torch.Te
     return broadcasted
 
 
-def sparse_batch_op(input: SparseTensor, other: torch.Tensor, op: callable = torch.add) -> SparseTensor:
+def sparse_batch_op(
+    input: SparseTensor,
+    other: torch.Tensor,
+    op: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] = torch.add,
+) -> SparseTensor:
     """
     Broadcast a 1D tensor to a sparse tensor along the batch dimension then perform an operation.
     

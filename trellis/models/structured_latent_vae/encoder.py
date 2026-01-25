@@ -1,4 +1,6 @@
-from typing import *
+from __future__ import annotations
+
+from typing import Literal, Optional, Tuple, overload
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -15,7 +17,7 @@ class SLatEncoder(SparseTransformerBase):
         latent_channels: int,
         num_blocks: int,
         num_heads: Optional[int] = None,
-        num_head_channels: Optional[int] = 64,
+        num_head_channels: int = 64,
         mlp_ratio: float = 4,
         attn_mode: Literal["full", "shift_window", "shift_sequence", "shift_order", "swin"] = "swin",
         window_size: int = 8,
@@ -51,7 +53,23 @@ class SLatEncoder(SparseTransformerBase):
         nn.init.constant_(self.out_layer.weight, 0)
         nn.init.constant_(self.out_layer.bias, 0)
 
-    def forward(self, x: sp.SparseTensor, sample_posterior=True, return_raw=False):
+    @overload
+    def forward(
+        self,
+        x: sp.SparseTensor,
+        sample_posterior: bool = True,
+        return_raw: Literal[False] = False,
+    ) -> sp.SparseTensor: ...
+
+    @overload
+    def forward(
+        self,
+        x: sp.SparseTensor,
+        sample_posterior: bool = True,
+        return_raw: Literal[True] = True,
+    ) -> Tuple[sp.SparseTensor, torch.Tensor, torch.Tensor]: ...
+
+    def forward(self, x: sp.SparseTensor, sample_posterior: bool = True, return_raw: bool = False):
         h = super().forward(x)
         h = h.type(x.dtype)
         h = h.replace(F.layer_norm(h.feats, h.feats.shape[-1:]))

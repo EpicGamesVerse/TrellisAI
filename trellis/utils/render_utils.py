@@ -1,8 +1,9 @@
+import importlib
+from typing import Any, Dict, Optional, Union, cast
+
 import torch
 import numpy as np
 from tqdm import tqdm
-import utils3d
-from PIL import Image
 
 from ..renderers import OctreeRenderer, GaussianRenderer, MeshRenderer
 from ..representations import Octree, Gaussian, MeshExtractResult
@@ -12,6 +13,13 @@ from .random_utils import sphere_hammersley_sequence
 from api_spz.core.exceptions import CancelledException
 
 def yaw_pitch_r_fov_to_extrinsics_intrinsics(yaws, pitchs, rs, fovs, dtype=torch.float32):
+    try:
+        utils3d: Any = importlib.import_module("utils3d")
+    except ModuleNotFoundError as e:
+        raise ModuleNotFoundError(
+            "Missing dependency 'utils3d'. Install the utils3d dependency (see setup.sh / requirements)."
+        ) from e
+
     is_list = isinstance(yaws, list)
     if not is_list:
         yaws = [yaws]
@@ -45,7 +53,18 @@ def yaw_pitch_r_fov_to_extrinsics_intrinsics(yaws, pitchs, rs, fovs, dtype=torch
     return extrinsics, intrinsics
 
 
-def render_frames(sample, extrinsics, intrinsics, options={}, colors_overwrite=None, verbose=True, cancel_event=None, **kwargs):
+def render_frames(
+    sample: Union[Octree, Gaussian, MeshExtractResult],
+    extrinsics,
+    intrinsics,
+    options: Optional[Dict[str, Any]] = None,
+    colors_overwrite: Optional[torch.Tensor] = None,
+    verbose: bool = True,
+    cancel_event=None,
+    **kwargs,
+):
+    if options is None:
+        options = {}
     if isinstance(sample, Octree):
         renderer = OctreeRenderer()
         renderer.rendering_options.resolution = options.get('resolution', 512)
@@ -78,8 +97,8 @@ def render_frames(sample, extrinsics, intrinsics, options={}, colors_overwrite=N
         if cancel_event and cancel_event.is_set(): 
             raise CancelledException(f"User Cancelled")
         
-        if not isinstance(sample, MeshExtractResult):
-            res = renderer.render(sample, extr, intr, colors_overwrite=colors_overwrite)
+        if isinstance(sample, Octree):
+            res = cast(OctreeRenderer, renderer).render(sample, extr, intr, colors_overwrite=colors_overwrite)
             if 'color' not in rets: rets['color'] = []
             if 'depth' not in rets: rets['depth'] = []
             rets['color'].append(np.clip(res['color'].detach().cpu().numpy().transpose(1, 2, 0) * 255, 0, 255).astype(np.uint8))
@@ -89,9 +108,15 @@ def render_frames(sample, extrinsics, intrinsics, options={}, colors_overwrite=N
                 rets['depth'].append(res['depth'].detach().cpu().numpy())
             else:
                 rets['depth'].append(None)
+        elif isinstance(sample, Gaussian):
+            res = cast(GaussianRenderer, renderer).render(sample, extr, intr, colors_overwrite=colors_overwrite)
+            if 'color' not in rets: rets['color'] = []
+            if 'depth' not in rets: rets['depth'] = []
+            rets['color'].append(np.clip(res['color'].detach().cpu().numpy().transpose(1, 2, 0) * 255, 0, 255).astype(np.uint8))
+            rets['depth'].append(None)
         else:
             try:
-                res = renderer.render(sample, extr, intr)
+                res = cast(MeshRenderer, renderer).render(sample, extr, intr)
             except RuntimeError as e:
                 msg = str(e)
                 is_cuda_nvdiffrast_error = (
@@ -107,7 +132,7 @@ def render_frames(sample, extrinsics, intrinsics, options={}, colors_overwrite=N
                     renderer.rendering_options.near = options.get('near', 1)
                     renderer.rendering_options.far = options.get('far', 100)
                     renderer.rendering_options.ssaa = 1
-                    res = renderer.render(sample, extr, intr)
+                    res = cast(MeshRenderer, renderer).render(sample, extr, intr)
                 else:
                     raise
             if 'normal' not in rets: rets['normal'] = []

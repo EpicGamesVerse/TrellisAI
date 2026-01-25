@@ -1,9 +1,13 @@
 import os
 import argparse
+import importlib
 from concurrent.futures import ThreadPoolExecutor
 from tqdm import tqdm
 import pandas as pd
-import objaverse.xl as oxl
+try:
+    oxl = importlib.import_module("objaverse.xl")
+except Exception as e:
+    raise ImportError("Missing dependency 'objaverse'. Install it to use ObjaverseXL download.") from e
 from utils import get_file_hash
 
 

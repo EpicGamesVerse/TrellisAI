@@ -1,13 +1,14 @@
 import os
 import shutil
 from dataclasses import dataclass
-from typing import Any, List, Tuple, Literal
+from typing import Any, List, Tuple, Literal, cast
 
-import torch  # pyright: ignore[reportMissingImports]
-import numpy as np  # pyright: ignore[reportMissingImports]
-import imageio  # pyright: ignore[reportMissingImports]
-from easydict import EasyDict as edict  # pyright: ignore[reportMissingImports]
-from PIL import Image  # pyright: ignore[reportMissingImports]
+import torch
+import numpy as np
+import imageio.v2 as imageio
+from numpy.typing import ArrayLike
+from easydict import EasyDict as edict
+from PIL import Image
 
 from trellis.representations import Gaussian, MeshExtractResult
 from trellis.utils import render_utils, postprocessing_utils
@@ -62,7 +63,7 @@ def pack_state(gs: Gaussian, mesh: MeshExtractResult) -> dict:
     }
 
 
-def unpack_state(state: dict) -> Tuple[Gaussian, edict]:
+def unpack_state(state: dict) -> Tuple[Gaussian, MeshExtractResult]:
     gs = Gaussian(
         aabb=state['gaussian']['aabb'],
         sh_degree=state['gaussian']['sh_degree'],
@@ -77,7 +78,7 @@ def unpack_state(state: dict) -> Tuple[Gaussian, edict]:
     gs._rotation = torch.tensor(state['gaussian']['_rotation'], device='cuda')
     gs._opacity = torch.tensor(state['gaussian']['_opacity'], device='cuda')
 
-    mesh = edict(
+    mesh = MeshExtractResult(
         vertices=torch.tensor(state['mesh']['vertices'], device='cuda'),
         faces=torch.tensor(state['mesh']['faces'], device='cuda'),
     )
@@ -147,14 +148,14 @@ def image_to_3d(
     if progress is not None:
         progress(0.75, desc="Rendering preview…")
 
-    video = render_utils.render_video(outputs['gaussian'][0], num_frames=120)['color']
-    video_geo = render_utils.render_video(outputs['mesh'][0], num_frames=120)['normal']
+    video = cast(list[np.ndarray], render_utils.render_video(outputs['gaussian'][0], num_frames=120)['color'])
+    video_geo = cast(list[np.ndarray], render_utils.render_video(outputs['mesh'][0], num_frames=120)['normal'])
     video = [np.concatenate([video[i], video_geo[i]], axis=1) for i in range(len(video))]
 
     video_path = os.path.join(user_dir, 'sample.mp4')
     if progress is not None:
         progress(0.9, desc="Saving preview…")
-    imageio.mimsave(video_path, video, fps=15)
+    imageio.mimwrite(video_path, cast(List[ArrayLike], video), fps=15)
 
     state = pack_state(outputs['gaussian'][0], outputs['mesh'][0])
     torch.cuda.empty_cache()

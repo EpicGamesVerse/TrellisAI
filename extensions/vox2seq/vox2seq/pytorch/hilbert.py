@@ -7,9 +7,12 @@ Please cite our work if the code is helpful to you.
 """
 
 import torch
+import math
+
+from typing import Any
 
 
-def right_shift(binary, k=1, axis=-1):
+def right_shift(binary: torch.Tensor, k: int = 1, axis: int = -1) -> torch.Tensor:
     """Right shift an array of binary values.
 
     Parameters:
@@ -81,10 +84,13 @@ def gray2binary(gray, axis=-1):
     """
 
     # Loop the log2(bits) number of times necessary, with shift and xor.
-    shift = 2 ** (torch.Tensor([gray.shape[axis]]).log2().ceil().int() - 1)
+    n_bits = int(gray.shape[axis])
+    if n_bits <= 0:
+        return gray
+    shift = 1 << (int(math.ceil(math.log2(n_bits))) - 1)
     while shift > 0:
-        gray = torch.logical_xor(gray, right_shift(gray, shift))
-        shift = torch.div(shift, 2, rounding_mode="floor")
+        gray = torch.logical_xor(gray, right_shift(gray, shift, axis=axis))
+        shift //= 2
     return gray
 
 

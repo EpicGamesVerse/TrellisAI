@@ -1,4 +1,6 @@
-from typing import *
+from __future__ import annotations
+
+from typing import List, Literal, Optional, Tuple, overload
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -100,7 +102,7 @@ class UpsampleBlock3d(nn.Module):
 
 class SparseStructureEncoder(nn.Module):
     """
-    Encoder for Sparse Structure (\mathcal{E}_S in the paper Sec. 3.3).
+    Encoder for Sparse Structure (\\mathcal{E}_S in the paper Sec. 3.3).
     
     Args:
         in_channels (int): Channels of the input.
@@ -183,7 +185,23 @@ class SparseStructureEncoder(nn.Module):
         self.blocks.apply(convert_module_to_f32)
         self.middle_block.apply(convert_module_to_f32)
 
-    def forward(self, x: torch.Tensor, sample_posterior: bool = False, return_raw: bool = False) -> torch.Tensor:
+    @overload
+    def forward(
+        self,
+        x: torch.Tensor,
+        sample_posterior: bool = False,
+        return_raw: Literal[False] = False,
+    ) -> torch.Tensor: ...
+
+    @overload
+    def forward(
+        self,
+        x: torch.Tensor,
+        sample_posterior: bool = False,
+        return_raw: Literal[True] = True,
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]: ...
+
+    def forward(self, x: torch.Tensor, sample_posterior: bool = False, return_raw: bool = False):
         h = self.input_layer(x)
         h = h.type(self.dtype)
 
@@ -209,7 +227,7 @@ class SparseStructureEncoder(nn.Module):
 
 class SparseStructureDecoder(nn.Module):
     """
-    Decoder for Sparse Structure (\mathcal{D}_S in the paper Sec. 3.3).
+    Decoder for Sparse Structure (\\mathcal{D}_S in the paper Sec. 3.3).
     
     Args:
         out_channels (int): Channels of the output.

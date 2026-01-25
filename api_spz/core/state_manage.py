@@ -1,11 +1,13 @@
 import torch
 from pathlib import Path
 from trellis.pipelines import TrellisImageTo3DPipeline
+from typing import Any, cast
 
 class TrellisState:
     def __init__(self):
         self.temp_dir = Path("temp")
         self.temp_dir.mkdir(exist_ok=True)
+        self.pipeline: TrellisImageTo3DPipeline | None = None
 
     def cleanup(self):
         if self.temp_dir.exists():
@@ -20,11 +22,11 @@ class TrellisState:
         print('')
         print(f"used precision: '{precision}'.  Loading...")
         if precision == "half" or precision=="float16":
-            pipeline.to(torch.float16) #cuts memory usage in half
+            cast(Any, pipeline).to(torch.float16) #cuts memory usage in half
             if "image_cond_model" in pipeline.models:
                 pipeline.models['image_cond_model'].half()  #cuts memory usage in half
         # Attach the pipeline to the state object:
-        state.pipeline = pipeline
+        self.pipeline = pipeline
         # DO NOT MOVE TO CUDA YET. We'll be dynamically loading parts between 'cpu' and 'cuda' soon.
         # Kept for precaution:
         #    pipeline.cuda()

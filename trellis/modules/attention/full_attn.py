@@ -1,4 +1,4 @@
-from typing import *
+from typing import overload
 import torch
 import math
 from . import DEBUG, BACKEND

@@ -1,10 +1,25 @@
-from typing import *
+from __future__ import annotations
+
+from typing import Literal, Optional, Tuple, cast
+
 import torch
 import torch.nn as nn
+from torch.utils.checkpoint import checkpoint
 from ..basic import SparseTensor
 from ..attention import SparseMultiHeadAttention, SerializeMode
 from ...norm import LayerNorm32
 from .blocks import SparseFeedForwardNet
+
+
+TransformerAttnMode = Literal["full", "shift_window", "shift_sequence", "shift_order", "swin"]
+
+
+def _to_sparse_attn_mode(attn_mode: TransformerAttnMode) -> Literal["full", "serialized", "windowed"]:
+    if attn_mode == "full":
+        return "full"
+    if attn_mode == "swin":
+        return "windowed"
+    return "serialized"
 
 
 class ModulatedSparseTransformerBlock(nn.Module):
@@ -16,7 +31,7 @@ class ModulatedSparseTransformerBlock(nn.Module):
         channels: int,
         num_heads: int,
         mlp_ratio: float = 4.0,
-        attn_mode: Literal["full", "shift_window", "shift_sequence", "shift_order", "swin"] = "full",
+        attn_mode: TransformerAttnMode = "full",
         window_size: Optional[int] = None,
         shift_sequence: Optional[int] = None,
         shift_window: Optional[Tuple[int, int, int]] = None,
@@ -35,7 +50,7 @@ class ModulatedSparseTransformerBlock(nn.Module):
         self.attn = SparseMultiHeadAttention(
             channels,
             num_heads=num_heads,
-            attn_mode=attn_mode,
+            attn_mode=_to_sparse_attn_mode(attn_mode),
             window_size=window_size,
             shift_sequence=shift_sequence,
             shift_window=shift_window,
@@ -73,7 +88,7 @@ class ModulatedSparseTransformerBlock(nn.Module):
 
     def forward(self, x: SparseTensor, mod: torch.Tensor) -> SparseTensor:
         if self.use_checkpoint:
-            return torch.utils.checkpoint.checkpoint(self._forward, x, mod, use_reentrant=False)
+            return cast(SparseTensor, checkpoint(self._forward, x, mod, use_reentrant=False))
         else:
             return self._forward(x, mod)
 
@@ -88,7 +103,7 @@ class ModulatedSparseTransformerCrossBlock(nn.Module):
         ctx_channels: int,
         num_heads: int,
         mlp_ratio: float = 4.0,
-        attn_mode: Literal["full", "shift_window", "shift_sequence", "shift_order", "swin"] = "full",
+        attn_mode: TransformerAttnMode = "full",
         window_size: Optional[int] = None,
         shift_sequence: Optional[int] = None,
         shift_window: Optional[Tuple[int, int, int]] = None,
@@ -111,7 +126,7 @@ class ModulatedSparseTransformerCrossBlock(nn.Module):
             channels,
             num_heads=num_heads,
             type="self",
-            attn_mode=attn_mode,
+            attn_mode=_to_sparse_attn_mode(attn_mode),
             window_size=window_size,
             shift_sequence=shift_sequence,
             shift_window=shift_window,
@@ -161,6 +176,6 @@ class ModulatedSparseTransformerCrossBlock(nn.Module):
 
     def forward(self, x: SparseTensor, mod: torch.Tensor, context: torch.Tensor) -> SparseTensor:
         if self.use_checkpoint:
-            return torch.utils.checkpoint.checkpoint(self._forward, x, mod, context, use_reentrant=False)
+            return cast(SparseTensor, checkpoint(self._forward, x, mod, context, use_reentrant=False))
         else:
             return self._forward(x, mod, context)

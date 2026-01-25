@@ -1,4 +1,7 @@
-from typing import *
+from __future__ import annotations
+
+from typing import Any, Optional, Tuple, cast
+
 import torch
 import numpy as np
 from tqdm import tqdm
@@ -73,7 +76,7 @@ class FlowEulerSampler(Sampler):
         """
         pred_x_0, pred_eps, pred_v = self._get_model_prediction(model, x_t, t, cond, **kwargs)
         pred_x_prev = x_t - (t - t_prev) * pred_v
-        return edict({"pred_x_prev": pred_x_prev, "pred_x_0": pred_x_0})
+        return cast(Any, edict({"pred_x_prev": pred_x_prev, "pred_x_0": pred_x_0}))
 
     @torch.no_grad()
     def sample(
@@ -109,11 +112,12 @@ class FlowEulerSampler(Sampler):
         t_seq = np.linspace(1, 0, steps + 1)
         t_seq = rescale_t * t_seq / (1 + (rescale_t - 1) * t_seq)
         t_pairs = list((t_seq[i], t_seq[i + 1]) for i in range(steps))
-        ret = edict({"samples": None, "pred_x_t": [], "pred_x_0": []})
+        ret = cast(Any, edict({"samples": None, "pred_x_t": [], "pred_x_0": []}))
         for t, t_prev in tqdm(t_pairs, desc="Sampling", disable=not verbose):
             if cancel_event and cancel_event.is_set(): 
                 raise CancelledException(f"Cancelled the Sampling.")
             out = self.sample_once(model, sample, t, t_prev, cond, **kwargs)
+            out = cast(Any, out)
             sample = out.pred_x_prev
             ret.pred_x_t.append(out.pred_x_prev)
             ret.pred_x_0.append(out.pred_x_0)

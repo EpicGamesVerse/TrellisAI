@@ -1,4 +1,6 @@
-from typing import *
+from __future__ import annotations
+
+from typing import Literal, Optional, Tuple
 import torch
 import torch.nn as nn
 from ...modules.utils import convert_module_to_f16, convert_module_to_f32
@@ -13,15 +15,19 @@ def block_attn_config(self):
     """
     for i in range(self.num_blocks):
         if self.attn_mode == "shift_window":
-            yield "serialized", self.window_size, 0, (16 * (i % 2),) * 3, sp.SerializeMode.Z_ORDER
+            shift = 16 * (i % 2)
+            yield "shift_window", self.window_size, 0, (shift, shift, shift), sp.SerializeMode.Z_ORDER
         elif self.attn_mode == "shift_sequence":
-            yield "serialized", self.window_size, self.window_size // 2 * (i % 2), (0, 0, 0), sp.SerializeMode.Z_ORDER
+            assert self.window_size is not None
+            yield "shift_sequence", self.window_size, self.window_size // 2 * (i % 2), (0, 0, 0), sp.SerializeMode.Z_ORDER
         elif self.attn_mode == "shift_order":
-            yield "serialized", self.window_size, 0, (0, 0, 0), sp.SerializeModes[i % 4]
+            yield "shift_order", self.window_size, 0, (0, 0, 0), sp.SerializeModes[i % 4]
         elif self.attn_mode == "full":
             yield "full", None, None, None, None
         elif self.attn_mode == "swin":
-            yield "windowed", self.window_size, None, self.window_size // 2 * (i % 2), None
+            assert self.window_size is not None
+            shift = self.window_size // 2 * (i % 2)
+            yield "swin", self.window_size, None, (shift, shift, shift), None
 
 
 class SparseTransformerBase(nn.Module):
@@ -35,7 +41,7 @@ class SparseTransformerBase(nn.Module):
         model_channels: int,
         num_blocks: int,
         num_heads: Optional[int] = None,
-        num_head_channels: Optional[int] = 64,
+        num_head_channels: int = 64,
         mlp_ratio: float = 4.0,
         attn_mode: Literal["full", "shift_window", "shift_sequence", "shift_order", "swin"] = "full",
         window_size: Optional[int] = None,

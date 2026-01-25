@@ -1,4 +1,4 @@
-from typing import *
+from typing import Literal
 
 BACKEND = 'flash_attn' 
 DEBUG = False

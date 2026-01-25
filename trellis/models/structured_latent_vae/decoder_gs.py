@@ -1,4 +1,6 @@
-from typing import *
+from __future__ import annotations
+
+from typing import List, Literal, Optional
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -16,7 +18,7 @@ class SLatGaussianDecoder(SparseTransformerBase):
         latent_channels: int,
         num_blocks: int,
         num_heads: Optional[int] = None,
-        num_head_channels: Optional[int] = 64,
+        num_head_channels: int = 64,
         mlp_ratio: float = 4,
         attn_mode: Literal["full", "shift_window", "shift_sequence", "shift_order", "swin"] = "swin",
         window_size: int = 8,
@@ -24,7 +26,7 @@ class SLatGaussianDecoder(SparseTransformerBase):
         use_fp16: bool = False,
         use_checkpoint: bool = False,
         qk_rms_norm: bool = False,
-        representation_config: dict = None,
+        representation_config: Optional[dict] = None,
     ):
         super().__init__(
             in_channels=latent_channels,
@@ -41,7 +43,9 @@ class SLatGaussianDecoder(SparseTransformerBase):
             qk_rms_norm=qk_rms_norm,
         )
         self.resolution = resolution
-        self.rep_config = representation_config
+        if representation_config is None:
+            raise ValueError("representation_config must be provided")
+        self.rep_config: dict = representation_config
         self._calc_layout()
         self.out_layer = sp.SparseLinear(model_channels, self.out_channels)
         self._build_perturbation()

@@ -1,7 +1,11 @@
-from typing import *
+from __future__ import annotations
+
+from typing import Any, List, Tuple, cast
+
 from enum import Enum
 import torch
 import math
+import importlib
 from .. import SparseTensor
 from .. import DEBUG, ATTN
 
@@ -39,7 +43,7 @@ def calc_serialization(
     serialize_mode: SerializeMode = SerializeMode.Z_ORDER,
     shift_sequence: int = 0,
     shift_window: Tuple[int, int, int] = (0, 0, 0)
-) -> Tuple[torch.Tensor, torch.Tensor, List[int]]:
+) -> Tuple[torch.Tensor, torch.Tensor, List[int], List[int]]:
     """
     Calculate serialization and partitioning for a set of coordinates.
 
@@ -59,8 +63,7 @@ def calc_serialization(
     seq_batch_indices = []
     offsets = [0]
     
-    if 'vox2seq' not in globals():
-        import vox2seq
+    vox2seq = cast(Any, importlib.import_module("vox2seq"))
 
     # Serialize the input
     serialize_coords = tensor.coords[:, 1:].clone()
@@ -143,7 +146,10 @@ def sparse_serialized_scaled_dot_product_self_attention(
         fwd_indices, bwd_indices, seq_lens, seq_batch_indices = calc_serialization(qkv, window_size, serialize_mode, shift_sequence, shift_window)
         qkv.register_spatial_cache(serialization_spatial_cache_name, (fwd_indices, bwd_indices, seq_lens, seq_batch_indices))
     else:
-        fwd_indices, bwd_indices, seq_lens, seq_batch_indices = serialization_spatial_cache
+        fwd_indices, bwd_indices, seq_lens, seq_batch_indices = cast(
+            Tuple[torch.Tensor, torch.Tensor, List[int], List[int]],
+            serialization_spatial_cache,
+        )
 
     M = fwd_indices.shape[0]
     T = qkv.feats.shape[0]
@@ -159,6 +165,7 @@ def sparse_serialized_scaled_dot_product_self_attention(
             assert (qkv_coords[start:start+seq_lens[i], 0] == seq_batch_indices[i]).all(), f"SparseWindowedScaledDotProductSelfAttention: batch index mismatch"
             start += seq_lens[i]
 
+    out: torch.Tensor
     if all([seq_len == window_size for seq_len in seq_lens]):
         B = len(seq_lens)
         N = window_size
@@ -167,7 +174,7 @@ def sparse_serialized_scaled_dot_product_self_attention(
             q, k, v = qkv_feats.unbind(dim=2)                       # [B, N, H, C]
             out = xops.memory_efficient_attention(q, k, v)          # [B, N, H, C]
         elif ATTN == 'flash_attn':
-            out = flash_attn.flash_attn_qkvpacked_func(qkv_feats)   # [B, N, H, C]
+            out = cast(torch.Tensor, flash_attn.flash_attn_qkvpacked_func(qkv_feats))   # [B, N, H, C]
         else:
             raise ValueError(f"Unknown attention module: {ATTN}")
         out = out.reshape(B * N, H, C)                              # [M, H, C]
@@ -182,7 +189,9 @@ def sparse_serialized_scaled_dot_product_self_attention(
         elif ATTN == 'flash_attn':
             cu_seqlens = torch.cat([torch.tensor([0]), torch.cumsum(torch.tensor(seq_lens), dim=0)], dim=0) \
                         .to(qkv.device).int()
-            out = flash_attn.flash_attn_varlen_qkvpacked_func(qkv_feats, cu_seqlens, max(seq_lens)) # [M, H, C]
+            out = cast(torch.Tensor, flash_attn.flash_attn_varlen_qkvpacked_func(qkv_feats, cu_seqlens, max(seq_lens))) # [M, H, C]
+        else:
+            raise ValueError(f"Unknown attention module: {ATTN}")
 
     out = out[bwd_indices]      # [T, H, C]
 

@@ -37,7 +37,7 @@ def download(metadata, output_dir, **kwargs):
         
         with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor, \
             tqdm(total=len(instances), desc="Extracting") as pbar:
-            def worker(instance: str) -> str:
+            def worker(instance: str) -> str | None:
                 try:
                     instance_files = list(filter(lambda x: x.startswith(f"{instance}/") and not x.endswith("/"), all_names))
                     zip_ref.extractall(os.path.join(output_dir, 'raw'), members=instance_files)

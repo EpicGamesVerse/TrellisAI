@@ -7,8 +7,8 @@ os.environ['ATTN_BACKEND'] = 'xformers'    # Can be 'flash-attn' or 'xformers', 
 os.environ['SPCONV_ALGO'] = 'native'        # Can be 'native' or 'auto', default is 'auto'.
                                             # 'auto' is faster but will do benchmarking at the beginning.
                                             # Recommended to set to 'native' if run only once.
-import imageio # pyright: ignore[reportMissingImports]
-from PIL import Image # pyright: ignore[reportMissingImports]
+import imageio
+from PIL import Image
 from trellis.pipelines import TrellisImageTo3DPipeline
 from trellis.utils import render_utils, postprocessing_utils
 

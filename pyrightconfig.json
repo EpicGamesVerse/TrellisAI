@@ -1,0 +1,25 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/pyright/main/packages/pyright/schema/pyrightconfig.schema.json",
+  "pythonVersion": "3.11",
+  "venvPath": ".",
+  "venv": "venv",
+  "typeCheckingMode": "basic",
+  "stubPath": "typings",
+  "reportWildcardImportFromLibrary": "none",
+  "reportGeneralTypeIssues": "none",
+  "reportUnknownMemberType": "none",
+  "reportUnknownVariableType": "none",
+  "reportUnknownArgumentType": "none",
+  "reportUnknownParameterType": "none",
+  "exclude": [
+    "venv",
+    "models",
+    "outputs_trellis",
+    "configs_trellis",
+    "tmp",
+    "models/**",
+    "outputs_trellis/**",
+    "configs_trellis/**",
+    "tmp/**"
+  ]
+}

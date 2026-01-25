@@ -7,9 +7,10 @@ os.environ['SPCONV_ALGO'] = 'native'        # Can be 'native' or 'auto', default
                                             # 'auto' is faster but will do benchmarking at the beginning.
                                             # Recommended to set to 'native' if run only once.
 
-import numpy as np # pyright: ignore[reportMissingImports]
-import imageio # pyright: ignore[reportMissingImports]
-from PIL import Image # pyright: ignore[reportMissingImports]
+import numpy as np
+import imageio.v2 as imageio
+from typing import Any, cast
+from PIL import Image
 from trellis.pipelines import TrellisImageTo3DPipeline
 from trellis.utils import render_utils
 
@@ -19,9 +20,9 @@ pipeline.cuda()
 
 # Load an image
 images = [
-    Image.open("assets/example_multi_image/character_1.png"),
-    Image.open("assets/example_multi_image/character_2.png"),
-    Image.open("assets/example_multi_image/character_3.png"),
+    Image.open("assets/example_multi_image/character_1.png").convert("RGBA"),
+    Image.open("assets/example_multi_image/character_2.png").convert("RGBA"),
+    Image.open("assets/example_multi_image/character_3.png").convert("RGBA"),
 ]
 
 # Run the pipeline
@@ -46,4 +47,4 @@ outputs = pipeline.run_multi_image(
 video_gs = render_utils.render_video(outputs['gaussian'][0])['color']
 video_mesh = render_utils.render_video(outputs['mesh'][0])['normal']
 video = [np.concatenate([frame_gs, frame_mesh], axis=1) for frame_gs, frame_mesh in zip(video_gs, video_mesh)]
-imageio.mimsave("sample_multi.mp4", video, fps=30)
+cast(Any, imageio).mimsave("sample_multi.mp4", video, fps=30)

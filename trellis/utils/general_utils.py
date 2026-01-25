@@ -115,7 +115,12 @@ def dict_flatten(dic, sep='.'):
     return flat_dict
 
 
-def make_grid(images, nrow=None, ncol=None, aspect_ratio=None):
+def make_grid(
+    images: list[np.ndarray],
+    nrow: int | None = None,
+    ncol: int | None = None,
+    aspect_ratio: float | None = None,
+) -> np.ndarray:
     num_images = len(images)
     if nrow is None and ncol is None:
         if aspect_ratio is not None:
@@ -127,8 +132,14 @@ def make_grid(images, nrow=None, ncol=None, aspect_ratio=None):
         nrow = (num_images + ncol - 1) // ncol
     elif nrow is not None and ncol is None:
         ncol = (num_images + nrow - 1) // nrow
-    else:
+    elif nrow is not None and ncol is not None:
         assert nrow * ncol >= num_images, 'nrow * ncol must be greater than or equal to the number of images'
+    else:
+        raise ValueError("make_grid: nrow/ncol must be both None or integers")
+
+    assert nrow is not None and ncol is not None
+    nrow = int(nrow)
+    ncol = int(ncol)
         
     grid = np.zeros((nrow * images[0].shape[0], ncol * images[0].shape[1], images[0].shape[2]), dtype=images[0].dtype)
     for i, img in enumerate(images):

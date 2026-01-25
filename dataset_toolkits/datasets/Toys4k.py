@@ -33,7 +33,7 @@ def download(metadata, output_dir, **kwargs):
     with zipfile.ZipFile(os.path.join(output_dir, 'raw', 'toys4k_blend_files.zip')) as zip_ref:
         with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor, \
             tqdm(total=len(metadata), desc="Extracting") as pbar:
-            def worker(instance: str) -> str:
+            def worker(instance: str) -> str | None:
                 try:
                     zip_ref.extract(os.path.join('toys4k_blend_files', instance), os.path.join(output_dir, 'raw'))
                     sha256 = get_file_hash(os.path.join(output_dir, 'raw/toys4k_blend_files', instance))

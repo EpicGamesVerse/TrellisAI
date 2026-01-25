@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+from typing import Any, cast
 from .. import SparseTensor
 from .. import DEBUG
 from . import SPCONV_ALGO
@@ -17,7 +18,8 @@ class SparseConv3d(nn.Module):
         if stride == 1 and (padding is None):
             self.conv = spconv.SubMConv3d(in_channels, out_channels, kernel_size, dilation=dilation, bias=bias, indice_key=indice_key, algo=algo)
         else:
-            self.conv = spconv.SparseConv3d(in_channels, out_channels, kernel_size, stride=stride, dilation=dilation, padding=padding, bias=bias, indice_key=indice_key, algo=algo)
+            padding_i = 0 if padding is None else padding
+            self.conv = spconv.SparseConv3d(in_channels, out_channels, kernel_size, stride=stride, dilation=dilation, padding=padding_i, bias=bias, indice_key=indice_key, algo=algo)
         self.stride = tuple(stride) if isinstance(stride, (list, tuple)) else (stride, stride, stride)
         self.padding = padding
 
@@ -63,9 +65,13 @@ class SparseInverseConv3d(nn.Module):
             # recover the original spconv order
             data = x.get_spatial_cache(f'conv_{self.stride}_unsorted_data')
             bwd = x.get_spatial_cache(f'conv_{self.stride}_sort_bwd')
-            data = data.replace_feature(x.feats[bwd])
+            if data is None or bwd is None:
+                raise ValueError("Missing spconv spatial cache needed to invert convolution")
+            data_any = cast(Any, data)
+            bwd_t = cast(torch.Tensor, bwd)
+            data = data_any.replace_feature(x.feats[bwd_t])
             if DEBUG:
-                assert torch.equal(data.indices, x.coords[bwd]), 'Recover the original order failed'
+                assert torch.equal(data.indices, x.coords[bwd_t]), 'Recover the original order failed'
         else:
             data = x.data
 

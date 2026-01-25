@@ -11,6 +11,8 @@ from easydict import EasyDict as edict
 from concurrent.futures import ThreadPoolExecutor
 import utils3d
 
+from typing import Any, cast
+
 def get_first_directory(path):  
     with os.scandir(path) as it:  
         for entry in it:  
@@ -18,8 +20,8 @@ def get_first_directory(path):
                 return entry.name  
     return None
 
-def need_process(key):
-    return key in opt.field or opt.field == ['all']
+def need_process(key: str, fields: list[str]) -> bool:
+    return key in fields or fields == ['all']
 
 if __name__ == '__main__':
     dataset_utils = importlib.import_module(f'datasets.{sys.argv[1]}')
@@ -36,27 +38,32 @@ if __name__ == '__main__':
     opt = parser.parse_args(sys.argv[2:])
     opt = edict(vars(opt))
 
-    os.makedirs(opt.output_dir, exist_ok=True)
-    os.makedirs(os.path.join(opt.output_dir, 'merged_records'), exist_ok=True)
+    opt_any = cast(Any, opt)
+    output_dir: str = str(opt_any.output_dir)
+    fields: list[str] = str(opt_any.field).split(',')
+    from_file: bool = bool(opt_any.from_file)
+    opt_dict: dict[str, Any] = dict(opt_any)
+    opt_dict['field'] = fields
 
-    opt.field = opt.field.split(',')
+    os.makedirs(output_dir, exist_ok=True)
+    os.makedirs(os.path.join(output_dir, 'merged_records'), exist_ok=True)
     
     timestamp = str(int(time.time()))
 
     # get file list
-    if os.path.exists(os.path.join(opt.output_dir, 'metadata.csv')):
+    if os.path.exists(os.path.join(output_dir, 'metadata.csv')):
         print('Loading previous metadata...')
-        metadata = pd.read_csv(os.path.join(opt.output_dir, 'metadata.csv'))
+        metadata = pd.read_csv(os.path.join(output_dir, 'metadata.csv'))
     else:
-        metadata = dataset_utils.get_metadata(**opt)
+        metadata = dataset_utils.get_metadata(**opt_dict)
     metadata.set_index('sha256', inplace=True)
     
     # merge downloaded
-    df_files = [f for f in os.listdir(opt.output_dir) if f.startswith('downloaded_') and f.endswith('.csv')]
+    df_files = [f for f in os.listdir(output_dir) if f.startswith('downloaded_') and f.endswith('.csv')]
     df_parts = []
     for f in df_files:
         try:
-            df_parts.append(pd.read_csv(os.path.join(opt.output_dir, f)))
+            df_parts.append(pd.read_csv(os.path.join(output_dir, f)))
         except:
             pass
     if len(df_parts) > 0:
@@ -67,18 +74,18 @@ if __name__ == '__main__':
         else:
             metadata = metadata.join(df, on='sha256', how='left')
         for f in df_files:
-            shutil.move(os.path.join(opt.output_dir, f), os.path.join(opt.output_dir, 'merged_records', f'{timestamp}_{f}'))
+            shutil.move(os.path.join(output_dir, f), os.path.join(output_dir, 'merged_records', f'{timestamp}_{f}'))
             
     # detect models
     image_models = []
-    if os.path.exists(os.path.join(opt.output_dir, 'features')):
-        image_models = os.listdir(os.path.join(opt.output_dir, 'features'))
+    if os.path.exists(os.path.join(output_dir, 'features')):
+        image_models = os.listdir(os.path.join(output_dir, 'features'))
     latent_models = []
-    if os.path.exists(os.path.join(opt.output_dir, 'latents')):
-        latent_models = os.listdir(os.path.join(opt.output_dir, 'latents'))
+    if os.path.exists(os.path.join(output_dir, 'latents')):
+        latent_models = os.listdir(os.path.join(output_dir, 'latents'))
     ss_latent_models = []
-    if os.path.exists(os.path.join(opt.output_dir, 'ss_latents')):
-        ss_latent_models = os.listdir(os.path.join(opt.output_dir, 'ss_latents'))
+    if os.path.exists(os.path.join(output_dir, 'ss_latents')):
+        ss_latent_models = os.listdir(os.path.join(output_dir, 'ss_latents'))
     print(f'Image models: {image_models}')
     print(f'Latent models: {latent_models}')
     print(f'Sparse Structure latent models: {ss_latent_models}')
@@ -102,11 +109,11 @@ if __name__ == '__main__':
             metadata[f'ss_latent_{model}'] = [False] * len(metadata)
     
     # merge rendered
-    df_files = [f for f in os.listdir(opt.output_dir) if f.startswith('rendered_') and f.endswith('.csv')]
+    df_files = [f for f in os.listdir(output_dir) if f.startswith('rendered_') and f.endswith('.csv')]
     df_parts = []
     for f in df_files:
         try:
-            df_parts.append(pd.read_csv(os.path.join(opt.output_dir, f)))
+            df_parts.append(pd.read_csv(os.path.join(output_dir, f)))
         except:
             pass
     if len(df_parts) > 0:
@@ -114,14 +121,14 @@ if __name__ == '__main__':
         df.set_index('sha256', inplace=True)
         metadata.update(df, overwrite=True)
         for f in df_files:
-            shutil.move(os.path.join(opt.output_dir, f), os.path.join(opt.output_dir, 'merged_records', f'{timestamp}_{f}'))
+            shutil.move(os.path.join(output_dir, f), os.path.join(output_dir, 'merged_records', f'{timestamp}_{f}'))
     
     # merge voxelized
-    df_files = [f for f in os.listdir(opt.output_dir) if f.startswith('voxelized_') and f.endswith('.csv')]
+    df_files = [f for f in os.listdir(output_dir) if f.startswith('voxelized_') and f.endswith('.csv')]
     df_parts = []
     for f in df_files:
         try:
-            df_parts.append(pd.read_csv(os.path.join(opt.output_dir, f)))
+            df_parts.append(pd.read_csv(os.path.join(output_dir, f)))
         except:
             pass
     if len(df_parts) > 0:
@@ -129,14 +136,14 @@ if __name__ == '__main__':
         df.set_index('sha256', inplace=True)
         metadata.update(df, overwrite=True)
         for f in df_files:
-            shutil.move(os.path.join(opt.output_dir, f), os.path.join(opt.output_dir, 'merged_records', f'{timestamp}_{f}'))
+            shutil.move(os.path.join(output_dir, f), os.path.join(output_dir, 'merged_records', f'{timestamp}_{f}'))
     
     # merge cond_rendered
-    df_files = [f for f in os.listdir(opt.output_dir) if f.startswith('cond_rendered_') and f.endswith('.csv')]
+    df_files = [f for f in os.listdir(output_dir) if f.startswith('cond_rendered_') and f.endswith('.csv')]
     df_parts = []
     for f in df_files:
         try:
-            df_parts.append(pd.read_csv(os.path.join(opt.output_dir, f)))
+            df_parts.append(pd.read_csv(os.path.join(output_dir, f)))
         except:
             pass
     if len(df_parts) > 0:
@@ -144,15 +151,15 @@ if __name__ == '__main__':
         df.set_index('sha256', inplace=True)
         metadata.update(df, overwrite=True)
         for f in df_files:
-            shutil.move(os.path.join(opt.output_dir, f), os.path.join(opt.output_dir, 'merged_records', f'{timestamp}_{f}'))
+            shutil.move(os.path.join(output_dir, f), os.path.join(output_dir, 'merged_records', f'{timestamp}_{f}'))
     
     # merge features
     for model in image_models:
-        df_files = [f for f in os.listdir(opt.output_dir) if f.startswith(f'feature_{model}_') and f.endswith('.csv')]
+        df_files = [f for f in os.listdir(output_dir) if f.startswith(f'feature_{model}_') and f.endswith('.csv')]
         df_parts = []
         for f in df_files:
             try:
-                df_parts.append(pd.read_csv(os.path.join(opt.output_dir, f)))
+                df_parts.append(pd.read_csv(os.path.join(output_dir, f)))
             except:
                 pass
         if len(df_parts) > 0:
@@ -160,15 +167,15 @@ if __name__ == '__main__':
             df.set_index('sha256', inplace=True)
             metadata.update(df, overwrite=True)
             for f in df_files:
-                shutil.move(os.path.join(opt.output_dir, f), os.path.join(opt.output_dir, 'merged_records', f'{timestamp}_{f}'))
+                shutil.move(os.path.join(output_dir, f), os.path.join(output_dir, 'merged_records', f'{timestamp}_{f}'))
                 
     # merge latents
     for model in latent_models:
-        df_files = [f for f in os.listdir(opt.output_dir) if f.startswith(f'latent_{model}_') and f.endswith('.csv')]
+        df_files = [f for f in os.listdir(output_dir) if f.startswith(f'latent_{model}_') and f.endswith('.csv')]
         df_parts = []
         for f in df_files:
             try:
-                df_parts.append(pd.read_csv(os.path.join(opt.output_dir, f)))
+                df_parts.append(pd.read_csv(os.path.join(output_dir, f)))
             except:
                 pass
         if len(df_parts) > 0:
@@ -176,15 +183,15 @@ if __name__ == '__main__':
             df.set_index('sha256', inplace=True)
             metadata.update(df, overwrite=True)
             for f in df_files:
-                shutil.move(os.path.join(opt.output_dir, f), os.path.join(opt.output_dir, 'merged_records', f'{timestamp}_{f}'))
+                shutil.move(os.path.join(output_dir, f), os.path.join(output_dir, 'merged_records', f'{timestamp}_{f}'))
                 
     # merge sparse structure latents
     for model in ss_latent_models:
-        df_files = [f for f in os.listdir(opt.output_dir) if f.startswith(f'ss_latent_{model}_') and f.endswith('.csv')]
+        df_files = [f for f in os.listdir(output_dir) if f.startswith(f'ss_latent_{model}_') and f.endswith('.csv')]
         df_parts = []
         for f in df_files:
             try:
-                df_parts.append(pd.read_csv(os.path.join(opt.output_dir, f)))
+                df_parts.append(pd.read_csv(os.path.join(output_dir, f)))
             except:
                 pass
         if len(df_parts) > 0:
@@ -192,47 +199,47 @@ if __name__ == '__main__':
             df.set_index('sha256', inplace=True)
             metadata.update(df, overwrite=True)
             for f in df_files:
-                shutil.move(os.path.join(opt.output_dir, f), os.path.join(opt.output_dir, 'merged_records', f'{timestamp}_{f}'))
+                shutil.move(os.path.join(output_dir, f), os.path.join(output_dir, 'merged_records', f'{timestamp}_{f}'))
 
     # build metadata from files
-    if opt.from_file:
+    if from_file:
         with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor, \
             tqdm(total=len(metadata), desc="Building metadata") as pbar:
             def worker(sha256):
                 try:
-                    if need_process('rendered') and metadata.loc[sha256, 'rendered'] == False and \
-                        os.path.exists(os.path.join(opt.output_dir, 'renders', sha256, 'transforms.json')):
+                    if need_process('rendered', fields) and metadata.loc[sha256, 'rendered'] == False and \
+                        os.path.exists(os.path.join(output_dir, 'renders', sha256, 'transforms.json')):
                         metadata.loc[sha256, 'rendered'] = True
-                    if need_process('voxelized') and metadata.loc[sha256, 'rendered'] == True and metadata.loc[sha256, 'voxelized'] == False and \
-                        os.path.exists(os.path.join(opt.output_dir, 'voxels', f'{sha256}.ply')):
+                    if need_process('voxelized', fields) and metadata.loc[sha256, 'rendered'] == True and metadata.loc[sha256, 'voxelized'] == False and \
+                        os.path.exists(os.path.join(output_dir, 'voxels', f'{sha256}.ply')):
                         try:
-                            pts = utils3d.io.read_ply(os.path.join(opt.output_dir, 'voxels', f'{sha256}.ply'))[0]
+                            pts = utils3d.io.read_ply(os.path.join(output_dir, 'voxels', f'{sha256}.ply'))[0]
                             metadata.loc[sha256, 'voxelized'] = True
                             metadata.loc[sha256, 'num_voxels'] = len(pts)
                         except Exception as e:
                             pass
-                    if need_process('cond_rendered') and metadata.loc[sha256, 'cond_rendered'] == False and \
-                        os.path.exists(os.path.join(opt.output_dir, 'renders_cond', sha256, 'transforms.json')):
+                    if need_process('cond_rendered', fields) and metadata.loc[sha256, 'cond_rendered'] == False and \
+                        os.path.exists(os.path.join(output_dir, 'renders_cond', sha256, 'transforms.json')):
                         metadata.loc[sha256, 'cond_rendered'] = True
                     for model in image_models:
-                        if need_process(f'feature_{model}') and \
+                        if need_process(f'feature_{model}', fields) and \
                             metadata.loc[sha256, f'feature_{model}'] == False and \
                             metadata.loc[sha256, 'rendered'] == True and \
                             metadata.loc[sha256, 'voxelized'] == True and \
-                            os.path.exists(os.path.join(opt.output_dir, 'features', model, f'{sha256}.npz')):
+                            os.path.exists(os.path.join(output_dir, 'features', model, f'{sha256}.npz')):
                             metadata.loc[sha256, f'feature_{model}'] = True
                     for model in latent_models:
-                        if need_process(f'latent_{model}') and \
+                        if need_process(f'latent_{model}', fields) and \
                             metadata.loc[sha256, f'latent_{model}'] == False and \
                             metadata.loc[sha256, 'rendered'] == True and \
                             metadata.loc[sha256, 'voxelized'] == True and \
-                            os.path.exists(os.path.join(opt.output_dir, 'latents', model, f'{sha256}.npz')):
+                            os.path.exists(os.path.join(output_dir, 'latents', model, f'{sha256}.npz')):
                             metadata.loc[sha256, f'latent_{model}'] = True
                     for model in ss_latent_models:
-                        if need_process(f'ss_latent_{model}') and \
+                        if need_process(f'ss_latent_{model}', fields) and \
                             metadata.loc[sha256, f'ss_latent_{model}'] == False and \
                             metadata.loc[sha256, 'voxelized'] == True and \
-                            os.path.exists(os.path.join(opt.output_dir, 'ss_latents', model, f'{sha256}.npz')):
+                            os.path.exists(os.path.join(output_dir, 'ss_latents', model, f'{sha256}.npz')):
                             metadata.loc[sha256, f'ss_latent_{model}'] = True
                     pbar.update()
                 except Exception as e:
@@ -243,9 +250,9 @@ if __name__ == '__main__':
             executor.shutdown(wait=True)
 
     # statistics
-    metadata.to_csv(os.path.join(opt.output_dir, 'metadata.csv'))
+    metadata.to_csv(os.path.join(output_dir, 'metadata.csv'))
     num_downloaded = metadata['local_path'].count() if 'local_path' in metadata.columns else 0
-    with open(os.path.join(opt.output_dir, 'statistics.txt'), 'w') as f:
+    with open(os.path.join(output_dir, 'statistics.txt'), 'w') as f:
         f.write('Statistics:\n')
         f.write(f'  - Number of assets: {len(metadata)}\n')
         f.write(f'  - Number of assets downloaded: {num_downloaded}\n')
@@ -266,5 +273,5 @@ if __name__ == '__main__':
         f.write(f'  - Number of assets with captions: {metadata["captions"].count()}\n')
         f.write(f'  - Number of assets with image conditions: {metadata["cond_rendered"].sum()}\n')
         
-    with open(os.path.join(opt.output_dir, 'statistics.txt'), 'r') as f:
+    with open(os.path.join(output_dir, 'statistics.txt'), 'r') as f:
         print(f.read())

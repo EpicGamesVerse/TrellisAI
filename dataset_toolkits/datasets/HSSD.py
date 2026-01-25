@@ -44,7 +44,7 @@ def download(metadata, output_dir, **kwargs):
     metadata = metadata.set_index("file_identifier")
     with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor, \
         tqdm(total=len(metadata), desc="Downloading") as pbar:
-        def worker(instance: str) -> str:
+        def worker(instance: str) -> str | None:
             try:
                 huggingface_hub.hf_hub_download(repo_id="hssd/hssd-models", filename=instance, repo_type="dataset", local_dir=os.path.join(output_dir, 'raw'))
                 sha256 = get_file_hash(os.path.join(output_dir, 'raw', instance))

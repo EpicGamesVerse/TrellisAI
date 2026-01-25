@@ -4,7 +4,7 @@ import logging
 import threading
 import time
 import traceback
-from typing import Dict, Optional, Literal, List, Union
+from typing import Dict, Optional, Literal, List, Union, Any, cast
 import asyncio
 import io
 import base64
@@ -14,7 +14,7 @@ from fastapi import APIRouter, File, Response, UploadFile, Form, HTTPException, 
 from fastapi.responses import FileResponse
 from PIL import Image
 import torch
-import imageio
+import imageio.v2 as imageio
 
 from api_spz.core.exceptions import CancelledException
 from api_spz.core.files_manage import file_manager
@@ -124,6 +124,8 @@ async def _gen_3d_get_image(file: Optional[UploadFile], image_base64: Optional[s
             raise HTTPException(status_code=400, detail=f"Invalid base64 data: {str(e)}")
     else:
         try:
+            if file is None:
+                raise HTTPException(status_code=400, detail="No image file provided")
             content = await file.read()
             pil_image = Image.open(io.BytesIO(content)).convert("RGBA")
         except Exception as e:
@@ -171,6 +173,8 @@ async def _run_pipeline_generate_3d( pil_images: Union[Image.Image, List[Image.I
             "cfg_strength": arg.slat_guidance_strength,
         }
         pipeline = state.pipeline
+        if pipeline is None:
+            raise RuntimeError("Pipeline not initialized. Call initialize_pipeline first.")
         torch.cuda.empty_cache()
         gc.collect()
         # Decide single-image vs multi-image
@@ -237,7 +241,7 @@ async def _run_pipeline_generate_previews(outputs, resolution:int, preview_frame
         for name, video in videos.items():
             preview_path = file_manager.get_temp_path(f"preview_{name}.mp4")
             #use the video settings that unity3D can work with:
-            imageio.mimsave(str(preview_path),  video,  fps=preview_fps,  codec="libx264",  format="mp4", 
+            cast(Any, imageio).mimsave(str(preview_path),  video,  fps=preview_fps,  codec="libx264",  format="mp4", 
                             pixelformat="yuv420p",  ffmpeg_params=["-profile:v", "baseline", "-level", "3.0"])
             torch.cuda.empty_cache()
             gc.collect()
@@ -543,7 +547,7 @@ async def generate_multi_preview(
             }
             for name, video in videos.items():
                 preview_path = file_manager.get_temp_path(f"preview_{name}.mp4")
-                imageio.mimsave(
+                cast(Any, imageio).mimsave(
                     str(preview_path),
                     video,
                     fps=arg.preview_fps,

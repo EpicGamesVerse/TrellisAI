@@ -1,4 +1,4 @@
-from typing import *
+from typing import Any, List, Literal, Optional, Union, cast
 from contextlib import contextmanager
 import torch
 import torch.nn as nn
@@ -31,22 +31,37 @@ class TrellisImageTo3DPipeline(Pipeline):
     """
     def __init__(
         self,
-        models: dict[str, nn.Module] = None,
-        sparse_structure_sampler: samplers.Sampler = None,
-        slat_sampler: samplers.Sampler = None,
-        slat_normalization: dict = None,
-        image_cond_model: str = None,
+        models: Optional[dict[str, nn.Module]] = None,
+        sparse_structure_sampler: Optional[samplers.Sampler] = None,
+        slat_sampler: Optional[samplers.Sampler] = None,
+        slat_normalization: Optional[dict[str, Any]] = None,
+        image_cond_model: Optional[str] = None,
     ):
-        if models is None:
-            return
-        super().__init__(models)
+        # Initialize attributes even when instantiated "empty" (e.g. in from_pretrained).
+        # This avoids runtime AttributeError when Pipeline.from_pretrained returns a base Pipeline
+        # and we later copy its __dict__ into a TrellisImageTo3DPipeline instance.
+        self.models: dict[str, nn.Module] = {}
         self.sparse_structure_sampler = sparse_structure_sampler
         self.slat_sampler = slat_sampler
-        self.sparse_structure_sampler_params = {}
-        self.slat_sampler_params = {}
+        self.sparse_structure_sampler_params: dict[str, Any] = {}
+        self.slat_sampler_params: dict[str, Any] = {}
         self.slat_normalization = slat_normalization
         self.rembg_session = None
-        self._init_image_cond_model(image_cond_model)
+        self._ensure_image_cond_model_transform()
+
+        if models is None:
+            return
+
+        super().__init__(models)
+        if image_cond_model is not None:
+            self._init_image_cond_model(image_cond_model)
+
+    def _ensure_image_cond_model_transform(self) -> None:
+        if hasattr(self, "image_cond_model_transform"):
+            return
+        self.image_cond_model_transform = transforms.Compose(
+            [transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])]
+        )
 
     @staticmethod
     def from_pretrained(path: str) -> "TrellisImageTo3DPipeline":
@@ -59,7 +74,10 @@ class TrellisImageTo3DPipeline(Pipeline):
         pipeline = super(TrellisImageTo3DPipeline, TrellisImageTo3DPipeline).from_pretrained(path)
         new_pipeline = TrellisImageTo3DPipeline()
         new_pipeline.__dict__ = pipeline.__dict__
-        args = pipeline._pretrained_args
+        new_pipeline._ensure_image_cond_model_transform()
+        if pipeline._pretrained_args is None:
+            raise ValueError("Loaded pipeline is missing pretrained args")
+        args = cast(dict[str, Any], pipeline._pretrained_args)
 
         new_pipeline.sparse_structure_sampler = getattr(samplers, args['sparse_structure_sampler']['name'])(**args['sparse_structure_sampler']['args'])
         new_pipeline.sparse_structure_sampler_params = args['sparse_structure_sampler']['params']
@@ -69,21 +87,17 @@ class TrellisImageTo3DPipeline(Pipeline):
 
         new_pipeline.slat_normalization = args['slat_normalization']
 
-        new_pipeline._init_image_cond_model(args['image_cond_model'])
+        new_pipeline._init_image_cond_model(cast(str, args['image_cond_model']))
 
         return new_pipeline
     
-    def _init_image_cond_model(self, name: str):
+    def _init_image_cond_model(self, name: str) -> None:
         """
         Initialize the image conditioning model.
         """
-        dinov2_model = torch.hub.load('facebookresearch/dinov2', name, pretrained=True, verbose=False)
+        dinov2_model = cast(nn.Module, torch.hub.load('facebookresearch/dinov2', name, pretrained=True, verbose=False))
         dinov2_model.eval()
         self.models['image_cond_model'] = dinov2_model
-        transform = transforms.Compose([
-            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-        ])
-        self.image_cond_model_transform = transform
 
     def preprocess_image(self, input: Image.Image) -> Image.Image:
         """
@@ -139,16 +153,26 @@ class TrellisImageTo3DPipeline(Pipeline):
             assert image.ndim == 4, "Image tensor should be batched (B, C, H, W)"
         elif isinstance(image, list):
             assert all(isinstance(i, Image.Image) for i in image), "Image list should be list of PIL images"
-            image = [i.resize((518, 518), Image.LANCZOS) for i in image]
-            image = [np.array(i.convert('RGB')).astype(np.float32) / 255 for i in image]
-            desired_dtype = self.models['image_cond_model'].patch_embed.proj.weight.dtype #so it works with float16 or float32, etc.
-            image = [torch.from_numpy(i).permute(2, 0, 1).to(desired_dtype) for i in image]
-            image = torch.stack(image).to(self.device)
+            resample = getattr(getattr(Image, "Resampling", Image), "LANCZOS")
+            pil_images = [i.resize((518, 518), resample) for i in image]
+            image_np_list = [np.array(i.convert('RGB')).astype(np.float32) / 255 for i in pil_images]
+
+            image_cond_model = cast(Any, self.models.get('image_cond_model'))
+            if image_cond_model is None:
+                raise ValueError("image_cond_model is not initialized")
+            desired_dtype = image_cond_model.patch_embed.proj.weight.dtype
+
+            image_t_list = [torch.from_numpy(arr).permute(2, 0, 1).to(dtype=desired_dtype) for arr in image_np_list]
+            image = torch.stack(image_t_list).to(self.device)
         else:
             raise ValueError(f"Unsupported type of image: {type(image)}")
         
+        self._ensure_image_cond_model_transform()
         image = self.image_cond_model_transform(image).to(self.device)
-        features = self.models['image_cond_model'](image, is_training=True)['x_prenorm']
+        image_cond_model = cast(Any, self.models.get('image_cond_model'))
+        if image_cond_model is None:
+            raise ValueError("image_cond_model is not initialized")
+        features = image_cond_model(image, is_training=True)['x_prenorm']
         patchtokens = F.layer_norm(features, features.shape[-1:])
         return patchtokens
         
@@ -185,12 +209,16 @@ class TrellisImageTo3DPipeline(Pipeline):
             sampler_params (dict): Additional parameters for the sampler.
         """
         # Sample occupancy latent
-        flow_model = self.models['sparse_structure_flow_model']
-        reso = flow_model.resolution
+        flow_model = cast(Any, self.models['sparse_structure_flow_model'])
+        reso = int(flow_model.resolution)
+        in_channels = int(flow_model.in_channels)
         desired_dtype = next(flow_model.parameters()).dtype #so that it workws with float16, float32, etc.
-        noise = torch.randn(num_samples, flow_model.in_channels, reso, reso, reso, dtype=desired_dtype).to(self.device)
+        noise = torch.randn(num_samples, in_channels, reso, reso, reso, dtype=desired_dtype).to(self.device)
         sampler_params = {**self.sparse_structure_sampler_params, **sampler_params}
-        z_s = self.sparse_structure_sampler.sample(
+        if self.sparse_structure_sampler is None:
+            raise ValueError("sparse_structure_sampler is not initialized")
+        sampler_any = cast(Any, self.sparse_structure_sampler)
+        z_s = sampler_any.sample(
             flow_model,
             noise,
             **cond,
@@ -267,14 +295,17 @@ class TrellisImageTo3DPipeline(Pipeline):
             sampler_params (dict): Additional parameters for the sampler.
         """
         # Sample structured latent
-        flow_model = self.models['slat_flow_model']
+        flow_model = cast(Any, self.models['slat_flow_model'])
         desired_dtype = next(flow_model.parameters()).dtype #so that it workws with float16, float32, etc.
         noise = sp.SparseTensor(
-            feats=torch.randn(coords.shape[0], flow_model.in_channels, dtype=desired_dtype).to(self.device),
+            feats=torch.randn(coords.shape[0], int(flow_model.in_channels), dtype=desired_dtype).to(self.device),
             coords=coords,
         )
         sampler_params = {**self.slat_sampler_params, **sampler_params}
-        slat = self.slat_sampler.sample(
+        if self.slat_sampler is None:
+            raise ValueError("slat_sampler is not initialized")
+        sampler_any = cast(Any, self.slat_sampler)
+        slat = sampler_any.sample(
             flow_model,
             noise,
             **cond,
@@ -282,6 +313,8 @@ class TrellisImageTo3DPipeline(Pipeline):
             verbose=True
         ).samples
 
+        if self.slat_normalization is None:
+            raise ValueError("slat_normalization is not initialized")
         std = torch.tensor(self.slat_normalization['std'])[None].to(slat.device)
         mean = torch.tensor(self.slat_normalization['mean'])[None].to(slat.device)
         slat = slat * std + mean
@@ -348,7 +381,7 @@ class TrellisImageTo3DPipeline(Pipeline):
             num_steps (int): The number of steps to run the sampler for.
         """
         self._move_all_models_to_cpu()
-        sampler = getattr(self, sampler_name)
+        sampler = cast(Any, getattr(self, sampler_name))
         setattr(sampler, f'_old_inference_model', sampler._inference_model)
 
         if mode == 'stochastic':
@@ -357,14 +390,15 @@ class TrellisImageTo3DPipeline(Pipeline):
                     "This may lead to performance degradation.\033[0m")
 
             cond_indices = (np.arange(num_steps) % num_images).tolist()
-            def _new_inference_model(self, model, x_t, t, cond, **kwargs):
+            def _new_inference_model_stochastic(self, model, x_t, t, cond, **kwargs):
                 cond_idx = cond_indices.pop(0)
                 cond_i = cond[cond_idx:cond_idx+1]
                 return self._old_inference_model(model, x_t, t, cond=cond_i, **kwargs)
+            new_inference_model = _new_inference_model_stochastic
         
         elif mode =='multidiffusion':
             from .samplers import FlowEulerSampler
-            def _new_inference_model(self, model, x_t, t, cond, neg_cond, cfg_strength, cfg_interval, **kwargs):
+            def _new_inference_model_multidiffusion(self, model, x_t, t, cond, neg_cond, cfg_strength, cfg_interval, **kwargs):
                 if cfg_interval[0] <= t <= cfg_interval[1]:
                     preds = []
                     for i in range(len(cond)):
@@ -378,11 +412,13 @@ class TrellisImageTo3DPipeline(Pipeline):
                         preds.append(FlowEulerSampler._inference_model(self, model, x_t, t, cond[i:i+1], **kwargs))
                     pred = sum(preds) / len(preds)
                     return pred
+
+            new_inference_model = _new_inference_model_multidiffusion
             
         else:
             raise ValueError(f"Unsupported mode: {mode}")
             
-        sampler._inference_model = _new_inference_model.__get__(sampler, type(sampler))
+        sampler._inference_model = new_inference_model.__get__(sampler, type(sampler))
 
         yield
 
@@ -422,14 +458,18 @@ class TrellisImageTo3DPipeline(Pipeline):
         cond['neg_cond'] = cond['neg_cond'][:1]
         torch.manual_seed(seed)
         
-        ss_steps = {**self.sparse_structure_sampler_params, **sparse_structure_sampler_params}.get('steps')
-        with self.inject_sampler_multi_image('sparse_structure_sampler', len(images), ss_steps, mode=mode):
+        ss_steps_raw = {**self.sparse_structure_sampler_params, **sparse_structure_sampler_params}.get('steps')
+        if ss_steps_raw is None:
+            raise ValueError("Missing 'steps' for sparse_structure_sampler")
+        with self.inject_sampler_multi_image('sparse_structure_sampler', len(images), int(ss_steps_raw), mode=mode):
             self._move_models(['sparse_structure_flow_model', 'sparse_structure_decoder'], 'cuda', empty_cache=False) #load into gpu memory
             coords = self.sample_sparse_structure(cond, num_samples, sparse_structure_sampler_params)
             self._move_models(['sparse_structure_flow_model', 'sparse_structure_decoder'], 'cpu', empty_cache=True) #unload from gpu memory
 
-        slat_steps = {**self.slat_sampler_params, **slat_sampler_params}.get('steps')
-        with self.inject_sampler_multi_image('slat_sampler', len(images), slat_steps, mode=mode):
+        slat_steps_raw = {**self.slat_sampler_params, **slat_sampler_params}.get('steps')
+        if slat_steps_raw is None:
+            raise ValueError("Missing 'steps' for slat_sampler")
+        with self.inject_sampler_multi_image('slat_sampler', len(images), int(slat_steps_raw), mode=mode):
             if cancel_event and cancel_event.is_set(): raise CancelledException(f"User Cancelled")
 
             self._move_models(['slat_flow_model'], 'cuda', empty_cache=False) #unload from gpu memory
