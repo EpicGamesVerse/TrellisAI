@@ -80,7 +80,12 @@ def initialize_pipeline(precision="full"):
 if __name__ == "__main__":
     pipeline = initialize_pipeline(cmd_args.precision)
     print(f'')
-    print(f"After launched, open a browser and enter 127.0.0.1:7860 (or whatever IP and port is shown below) into url, as if it was a website:")
+    print(
+        "After launched, open a browser and enter 127.0.0.1:7860 (or whatever IP and port is shown below) into url, as if it was a website:"
+    )
     demo = create_demo(pipeline)
     demo.queue()
-    demo.launch(inbrowser=True, share=cmd_args.share)
+    try:
+        demo.launch(inbrowser=True, share=cmd_args.share, quiet=True)
+    except TypeError:
+        demo.launch(inbrowser=True, share=cmd_args.share)

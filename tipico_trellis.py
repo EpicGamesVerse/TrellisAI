@@ -1276,4 +1276,7 @@ def initialize_pipeline(precision_arg="fp32", highvram=False):
 
 if __name__ == "__main__":
     initialize_pipeline(cmd_args.precision, cmd_args.highvram)
-    demo.launch(inbrowser=True, share=cmd_args.share)
+    try:
+        demo.launch(inbrowser=True, share=cmd_args.share, quiet=True)
+    except TypeError:
+        demo.launch(inbrowser=True, share=cmd_args.share)
