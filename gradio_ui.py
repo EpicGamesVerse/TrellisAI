@@ -1,7 +1,7 @@
 import os
 
-import gradio as gr  # pyright: ignore[reportMissingImports]
-from gradio_litmodel3d import LitModel3D  # pyright: ignore[reportMissingImports]
+import gradio as gr  
+from gradio_litmodel3d import LitModel3D
 
 import gradio_logic
 

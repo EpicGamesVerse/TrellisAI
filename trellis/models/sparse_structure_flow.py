@@ -1,4 +1,6 @@
-from typing import *
+from __future__ import annotations
+
+from typing import Any, Literal, Optional, cast
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -12,7 +14,7 @@ class TimestepEmbedder(nn.Module):
     """
     Embeds scalar timesteps into vector representations.
     """
-    def __init__(self, hidden_size, frequency_embedding_size=256):
+    def __init__(self, hidden_size: int, frequency_embedding_size: int = 256):
         super().__init__()
         self.mlp = nn.Sequential(
             nn.Linear(frequency_embedding_size, hidden_size, bias=True),
@@ -22,7 +24,7 @@ class TimestepEmbedder(nn.Module):
         self.frequency_embedding_size = frequency_embedding_size
 
     @staticmethod
-    def timestep_embedding(t, dim, max_period=10000):
+    def timestep_embedding(t: torch.Tensor, dim: int, max_period: int = 10000) -> torch.Tensor:
         """
         Create sinusoidal timestep embeddings.
 
@@ -48,10 +50,11 @@ class TimestepEmbedder(nn.Module):
         # Convert back to input dtype before returning
         return embedding
 
-    def forward(self, t):
-        t = t.to(self.mlp[0].weight.dtype)# Make sure t matches the MLP’s dtype (often half if the model is half)
+    def forward(self, t: torch.Tensor) -> torch.Tensor:
+        mlp0 = cast(nn.Linear, self.mlp[0])
+        t = t.to(dtype=mlp0.weight.dtype)
         t_freq = self.timestep_embedding(t, self.frequency_embedding_size)
-        t_freq = t_freq.to(self.mlp[0].weight.dtype)# also ensure t_freq is cast if needed
+        t_freq = t_freq.to(dtype=mlp0.weight.dtype)
         t_emb = self.mlp(t_freq)
         return t_emb
 
@@ -66,7 +69,7 @@ class SparseStructureFlowModel(nn.Module):
         out_channels: int,
         num_blocks: int,
         num_heads: Optional[int] = None,
-        num_head_channels: Optional[int] = 64,
+        num_head_channels: int = 64,
         mlp_ratio: float = 4,
         patch_size: int = 2,
         pe_mode: Literal["ape", "rope"] = "ape",
@@ -161,17 +164,24 @@ class SparseStructureFlowModel(nn.Module):
         self.apply(_basic_init)
 
         # Initialize timestep embedding MLP:
-        nn.init.normal_(self.t_embedder.mlp[0].weight, std=0.02)
-        nn.init.normal_(self.t_embedder.mlp[2].weight, std=0.02)
+        mlp0 = cast(nn.Linear, self.t_embedder.mlp[0])
+        mlp2 = cast(nn.Linear, self.t_embedder.mlp[2])
+        nn.init.normal_(mlp0.weight, std=0.02)
+        nn.init.normal_(mlp2.weight, std=0.02)
 
         # Zero-out adaLN modulation layers in DiT blocks:
         if self.share_mod:
-            nn.init.constant_(self.adaLN_modulation[-1].weight, 0)
-            nn.init.constant_(self.adaLN_modulation[-1].bias, 0)
+            ada = cast(nn.Sequential, self.adaLN_modulation)
+            last = cast(nn.Linear, ada[-1])
+            nn.init.constant_(last.weight, 0)
+            nn.init.constant_(last.bias, 0)
         else:
             for block in self.blocks:
-                nn.init.constant_(block.adaLN_modulation[-1].weight, 0)
-                nn.init.constant_(block.adaLN_modulation[-1].bias, 0)
+                block_any = cast(Any, block)
+                ada = cast(nn.Sequential, block_any.adaLN_modulation)
+                last = cast(nn.Linear, ada[-1])
+                nn.init.constant_(last.weight, 0)
+                nn.init.constant_(last.bias, 0)
 
         # Zero-out output layers:
         nn.init.constant_(self.out_layer.weight, 0)
@@ -185,7 +195,8 @@ class SparseStructureFlowModel(nn.Module):
         h = h.view(*h.shape[:2], -1).permute(0, 2, 1).contiguous()
 
         h = self.input_layer(h)
-        h = h + self.pos_emb[None]
+        pos_emb = cast(torch.Tensor, self.pos_emb)
+        h = h + pos_emb[None]
         t_emb = self.t_embedder(t)
         if self.share_mod:
             t_emb = self.adaLN_modulation(t_emb)

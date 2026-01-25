@@ -1,4 +1,4 @@
-from typing import *
+from typing import Optional, Any
 import torch
 import torch.nn as nn
 from .. import models
@@ -10,8 +10,9 @@ class Pipeline:
     """
     def __init__(
         self,
-        models: dict[str, nn.Module] = None,
+        models: Optional[dict[str, nn.Module]] = None,
     ):
+        self._pretrained_args: Optional[dict[str, Any]] = None
         if models is None:
             return
         self.models = models

@@ -6,6 +6,7 @@ import pandas as pd
 from tqdm import tqdm
 from easydict import EasyDict as edict
 from concurrent.futures import ThreadPoolExecutor
+from typing import Any, cast
 
 
 if __name__ == '__main__':
@@ -20,6 +21,7 @@ if __name__ == '__main__':
                         help='Number of samples to use for calculating stats')
     opt = parser.parse_args()
     opt = edict(vars(opt))
+    opt = cast(Any, opt)
 
     # get file list
     if os.path.exists(os.path.join(opt.output_dir, 'metadata.csv')):
@@ -29,17 +31,18 @@ if __name__ == '__main__':
     if opt.filter_low_aesthetic_score is not None:
         metadata = metadata[metadata['aesthetic_score'] >= opt.filter_low_aesthetic_score]
     metadata = metadata[metadata[f'latent_{opt.model}'] == True]
-    sha256s = metadata['sha256'].values
+    sha256s = metadata['sha256'].astype(str).to_numpy()
     sha256s = np.random.choice(sha256s, min(opt.num_samples, len(sha256s)), replace=False)
 
     # stats
     means = []
     mean2s = []
+    opt_any = cast(Any, opt)
     with ThreadPoolExecutor(max_workers=16) as executor, \
         tqdm(total=len(sha256s), desc="Extracting features") as pbar:
         def worker(sha256):
             try:
-                feats = np.load(os.path.join(opt.output_dir, 'latents', opt.model, f'{sha256}.npz'))
+                feats = np.load(os.path.join(opt_any.output_dir, 'latents', opt_any.model, f'{sha256}.npz'))
                 feats = feats['feats']
                 means.append(feats.mean(axis=0))
                 mean2s.append((feats ** 2).mean(axis=0))

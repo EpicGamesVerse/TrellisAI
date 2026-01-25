@@ -1,6 +1,7 @@
-from typing import *
+from typing import Literal, Optional, Tuple, cast
 import torch
 import torch.nn as nn
+from torch.utils.checkpoint import checkpoint
 from ..attention import MultiHeadAttention
 from ..norm import LayerNorm32
 from .blocks import FeedForwardNet
@@ -68,7 +69,7 @@ class ModulatedTransformerBlock(nn.Module):
 
     def forward(self, x: torch.Tensor, mod: torch.Tensor) -> torch.Tensor:
         if self.use_checkpoint:
-            return torch.utils.checkpoint.checkpoint(self._forward, x, mod, use_reentrant=False)
+            return cast(torch.Tensor, checkpoint(self._forward, x, mod, use_reentrant=False))
         else:
             return self._forward(x, mod)
 
@@ -151,7 +152,7 @@ class ModulatedTransformerCrossBlock(nn.Module):
 
     def forward(self, x: torch.Tensor, mod: torch.Tensor, context: torch.Tensor):
         if self.use_checkpoint:
-            return torch.utils.checkpoint.checkpoint(self._forward, x, mod, context, use_reentrant=False)
+            return checkpoint(self._forward, x, mod, context, use_reentrant=False)
         else:
             return self._forward(x, mod, context)
         

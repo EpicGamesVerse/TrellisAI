@@ -6,7 +6,7 @@
 # --------------------------------------------------------
 
 import torch
-from typing import Optional, Union
+from typing import Optional, Union, cast
 
 
 class KeyLUT:
@@ -28,13 +28,15 @@ class KeyLUT:
     def encode_lut(self, device=torch.device("cpu")):
         if device not in self._encode:
             cpu = torch.device("cpu")
-            self._encode[device] = tuple(e.to(device) for e in self._encode[cpu])
+            enc = self._encode[cpu]
+            self._encode[device] = (enc[0].to(device), enc[1].to(device), enc[2].to(device))
         return self._encode[device]
 
     def decode_lut(self, device=torch.device("cpu")):
         if device not in self._decode:
             cpu = torch.device("cpu")
-            self._decode[device] = tuple(e.to(device) for e in self._decode[cpu])
+            dec = self._decode[cpu]
+            self._decode[device] = (dec[0].to(device), dec[1].to(device), dec[2].to(device))
         return self._decode[device]
 
     def xyz2key(self, x, y, z, depth):
@@ -95,7 +97,9 @@ def xyz2key(
         key = key16 << 24 | key
 
     if b is not None:
-        b = b.long()
+        if not torch.is_tensor(b):
+            b = torch.tensor(b, device=key.device)
+        b = cast(torch.Tensor, b).long()
         key = b << 48 | key
 
     return key

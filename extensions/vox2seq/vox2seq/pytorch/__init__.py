@@ -1,9 +1,10 @@
+from __future__ import annotations
+
+from typing import List, Literal
+
 import torch
-from typing import *
 
 from .default import (
-    encode,
-    decode,
     z_order_encode,
     z_order_decode,
     hilbert_encode,

@@ -3,6 +3,7 @@ import nvdiffrast.torch as dr
 from easydict import EasyDict as edict
 from ..representations.mesh import MeshExtractResult
 import torch.nn.functional as F
+from typing import Any, cast
 
 
 def intrinsics_to_projection(
@@ -83,8 +84,8 @@ class MeshRenderer:
         
         if mesh.vertices.shape[0] == 0 or mesh.faces.shape[0] == 0:
             default_img = torch.zeros((1, resolution, resolution, 3), dtype=torch.float32, device=self.device)
-            ret_dict = {k : default_img if k in ['normal', 'normal_map', 'color'] else default_img[..., :1] for k in return_types}
-            return ret_dict
+            ret_dict = {k: default_img if k in ['normal', 'normal_map', 'color'] else default_img[..., :1] for k in return_types}
+            return edict(ret_dict)
         
         perspective = intrinsics_to_projection(intrinsics, near, far)
         
@@ -99,34 +100,45 @@ class MeshRenderer:
         # .to(float32) becuase dr needs vertex positions to  always be float32, regardless of pipeline precision:
         vertices_clip = torch.bmm(vertices_homo, full_proj.transpose(-1, -2)).float()
         faces_int = mesh.faces.int()
-        rast,  _  = dr.rasterize(self.glctx, vertices_clip, faces_int, (resolution * ssaa, resolution * ssaa))
+        rast_out = dr.rasterize(self.glctx, vertices_clip, faces_int, (resolution * ssaa, resolution * ssaa))
+        rast, _ = cast(tuple[torch.Tensor, torch.Tensor], rast_out)
         rast      = rast.float() #must always be float32
         
         out_dict = edict()
         for type in return_types:
-            img = None
+            img: torch.Tensor
             if type == "mask" :
-                img = dr.antialias((rast[..., -1:] > 0).float(), rast, vertices_clip, faces_int)
+                img = cast(torch.Tensor, dr.antialias((rast[..., -1:] > 0).float(), rast, vertices_clip, faces_int))
             elif type == "depth":
-                img = dr.interpolate(vertices_camera[..., 2:3].float().contiguous(), rast, faces_int)[0]
-                img = dr.antialias(img, rast, vertices_clip, faces_int)
+                depth_out = dr.interpolate(vertices_camera[..., 2:3].float().contiguous(), rast, faces_int)
+                img = cast(tuple[torch.Tensor, Any], depth_out)[0]
+                img = cast(torch.Tensor, dr.antialias(img, rast, vertices_clip, faces_int))
             elif type == "normal" :
-                img = dr.interpolate(
+                nrm_out = dr.interpolate(
                     #.float(), because must always be float32 regardless of pipeline precision:
                     mesh.face_normal.reshape(1, -1, 3).float(), rast, 
                     torch.arange(mesh.faces.shape[0] * 3, device=self.device, dtype=torch.int).reshape(-1, 3)
-                )[0]
-                img = dr.antialias(img, rast, vertices_clip, faces_int)
+                )
+                img = cast(tuple[torch.Tensor, Any], nrm_out)[0]
+                img = cast(torch.Tensor, dr.antialias(img, rast, vertices_clip, faces_int))
                 # normalize norm pictures
                 img = (img + 1) / 2
             elif type == "normal_map" :
                 #.float(), because must always be float32 regardless of pipeline precision:
-                img = dr.interpolate(mesh.vertex_attrs[:, 3:].contiguous().float(), rast, faces_int)[0]
-                img = dr.antialias(img, rast, vertices_clip, faces_int)
+                if mesh.vertex_attrs is None:
+                    raise ValueError("mesh.vertex_attrs is required for normal_map rendering")
+                nm_out = dr.interpolate(mesh.vertex_attrs[:, 3:].contiguous().float(), rast, faces_int)
+                img = cast(tuple[torch.Tensor, Any], nm_out)[0]
+                img = cast(torch.Tensor, dr.antialias(img, rast, vertices_clip, faces_int))
             elif type == "color" :
                 #.float(), because must always be float32 regardless of pipeline precision:
-                img = dr.interpolate(mesh.vertex_attrs[:, :3].contiguous().float(), rast, faces_int)[0]
-                img = dr.antialias(img, rast, vertices_clip, faces_int)
+                if mesh.vertex_attrs is None:
+                    raise ValueError("mesh.vertex_attrs is required for color rendering")
+                col_out = dr.interpolate(mesh.vertex_attrs[:, :3].contiguous().float(), rast, faces_int)
+                img = cast(tuple[torch.Tensor, Any], col_out)[0]
+                img = cast(torch.Tensor, dr.antialias(img, rast, vertices_clip, faces_int))
+            else:
+                raise ValueError(f"Unknown render type: {type}")
 
             if ssaa > 1:
                 img = F.interpolate(img.permute(0, 3, 1, 2), (resolution, resolution), mode='bilinear', align_corners=False, antialias=True)

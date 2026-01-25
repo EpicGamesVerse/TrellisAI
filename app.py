@@ -13,16 +13,16 @@ os.environ.setdefault("TORCH_HOME", os.path.join(_MODELS_DIR, "torch"))
 os.environ['ATTN_BACKEND'] = 'xformers'
 os.environ['SPCONV_ALGO'] = 'native' 
 
-import gradio as gr # pyright: ignore[reportMissingImports]
-from gradio_litmodel3d import LitModel3D # pyright: ignore[reportMissingImports]
+import gradio as gr
+from gradio_litmodel3d import LitModel3D
 
 import shutil
-from typing import *
-import torch # pyright: ignore[reportMissingImports]
-import numpy as np # pyright: ignore[reportMissingImports]
-import imageio # pyright: ignore[reportMissingImports]
-from easydict import EasyDict as edict # pyright: ignore[reportMissingImports]
-from PIL import Image # pyright: ignore[reportMissingImports]
+from typing import Any, List, Literal, Optional, Sequence, Tuple, cast
+import torch
+import numpy as np
+import imageio.v2 as imageio
+from easydict import EasyDict as edict
+from PIL import Image
 from trellis.pipelines import TrellisImageTo3DPipeline
 from trellis.representations import Gaussian, MeshExtractResult
 from trellis.utils import render_utils, postprocessing_utils
@@ -31,6 +31,9 @@ from trellis.utils import render_utils, postprocessing_utils
 MAX_SEED = np.iinfo(np.int32).max
 TMP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'tmp')
 os.makedirs(TMP_DIR, exist_ok=True)
+
+
+pipeline: Optional[TrellisImageTo3DPipeline] = None
 
 
 def start_session(req: gr.Request):
@@ -53,11 +56,13 @@ def preprocess_image(image: Image.Image) -> Image.Image:
     Returns:
         Image.Image: The preprocessed image.
     """
+    if pipeline is None:
+        raise RuntimeError("Pipeline is not initialized")
     processed_image = pipeline.preprocess_image(image)
     return processed_image
 
 
-def preprocess_images(images: List[Tuple[Image.Image, str]]) -> List[Image.Image]:
+def preprocess_images(images: Sequence[object]) -> List[Image.Image]:
     """
     Preprocess a list of input images.
     
@@ -67,12 +72,35 @@ def preprocess_images(images: List[Tuple[Image.Image, str]]) -> List[Image.Image
     Returns:
         List[Image.Image]: The preprocessed images.
     """
-    images = [image[0] for image in images]
-    processed_images = [pipeline.preprocess_image(image) for image in images]
+    if pipeline is None:
+        raise RuntimeError("Pipeline is not initialized")
+
+    pil_images: List[Image.Image] = []
+    for item in images:
+        if isinstance(item, tuple) and len(item) >= 1:
+            pil_images.append(cast(Tuple[Image.Image, str], item)[0])
+        else:
+            pil_images.append(cast(Image.Image, item))
+    processed_images = [pipeline.preprocess_image(img) for img in pil_images]
     return processed_images
 
 
 def pack_state(gs: Gaussian, mesh: MeshExtractResult) -> dict:
+    if gs._xyz is None:
+        raise ValueError("Gaussian state is incomplete: _xyz is None")
+    if gs._features_dc is None:
+        raise ValueError("Gaussian state is incomplete: _features_dc is None")
+    if gs._scaling is None:
+        raise ValueError("Gaussian state is incomplete: _scaling is None")
+    if gs._rotation is None:
+        raise ValueError("Gaussian state is incomplete: _rotation is None")
+    if gs._opacity is None:
+        raise ValueError("Gaussian state is incomplete: _opacity is None")
+    if mesh.vertices is None:
+        raise ValueError("Mesh state is incomplete: vertices is None")
+    if mesh.faces is None:
+        raise ValueError("Mesh state is incomplete: faces is None")
+
     return {
         'gaussian': {
             **gs.init_params,
@@ -89,7 +117,8 @@ def pack_state(gs: Gaussian, mesh: MeshExtractResult) -> dict:
     }
     
     
-def unpack_state(state: dict) -> Tuple[Gaussian, edict]:
+def unpack_state(state: dict) -> Tuple[Gaussian, MeshExtractResult]:
+    device = "cuda" if torch.cuda.is_available() else "cpu"
     gs = Gaussian(
         aabb=state['gaussian']['aabb'],
         sh_degree=state['gaussian']['sh_degree'],
@@ -97,16 +126,17 @@ def unpack_state(state: dict) -> Tuple[Gaussian, edict]:
         scaling_bias=state['gaussian']['scaling_bias'],
         opacity_bias=state['gaussian']['opacity_bias'],
         scaling_activation=state['gaussian']['scaling_activation'],
+        device=device,
     )
-    gs._xyz = torch.tensor(state['gaussian']['_xyz'], device='cuda')
-    gs._features_dc = torch.tensor(state['gaussian']['_features_dc'], device='cuda')
-    gs._scaling = torch.tensor(state['gaussian']['_scaling'], device='cuda')
-    gs._rotation = torch.tensor(state['gaussian']['_rotation'], device='cuda')
-    gs._opacity = torch.tensor(state['gaussian']['_opacity'], device='cuda')
+    gs._xyz = torch.tensor(state['gaussian']['_xyz'], device=device)
+    gs._features_dc = torch.tensor(state['gaussian']['_features_dc'], device=device)
+    gs._scaling = torch.tensor(state['gaussian']['_scaling'], device=device)
+    gs._rotation = torch.tensor(state['gaussian']['_rotation'], device=device)
+    gs._opacity = torch.tensor(state['gaussian']['_opacity'], device=device)
     
-    mesh = edict(
-        vertices=torch.tensor(state['mesh']['vertices'], device='cuda'),
-        faces=torch.tensor(state['mesh']['faces'], device='cuda'),
+    mesh = MeshExtractResult(
+        vertices=torch.tensor(state['mesh']['vertices'], device=device),
+        faces=torch.tensor(state['mesh']['faces'], device=device),
     )
     
     return gs, mesh
@@ -150,6 +180,8 @@ def image_to_3d(
         str: The path to the video of the 3D model.
     """
     user_dir = os.path.join(TMP_DIR, str(req.session_hash))
+    if pipeline is None:
+        raise RuntimeError("Pipeline is not initialized")
     if not is_multiimage:
         outputs = pipeline.run(
             image,
@@ -185,7 +217,7 @@ def image_to_3d(
     video_geo = render_utils.render_video(outputs['mesh'][0], num_frames=120)['normal']
     video = [np.concatenate([video[i], video_geo[i]], axis=1) for i in range(len(video))]
     video_path = os.path.join(user_dir, 'sample.mp4')
-    imageio.mimsave(video_path, video, fps=15)
+    cast(Any, imageio).mimsave(video_path, video, fps=15)
     state = pack_state(outputs['gaussian'][0], outputs['mesh'][0])
     torch.cuda.empty_cache()
     return state, video_path
@@ -253,14 +285,14 @@ def split_image(image: Image.Image) -> List[Image.Image]:
     """
     Split an image into multiple views.
     """
-    image = np.array(image)
-    alpha = image[..., 3]
+    image_np = np.array(image)
+    alpha = image_np[..., 3]
     alpha = np.any(alpha>0, axis=0)
     start_pos = np.where(~alpha[:-1] & alpha[1:])[0].tolist()
     end_pos = np.where(alpha[:-1] & ~alpha[1:])[0].tolist()
     images = []
     for s, e in zip(start_pos, end_pos):
-        images.append(Image.fromarray(image[:, s:e+1]))
+        images.append(Image.fromarray(image_np[:, s:e+1]))
     return [preprocess_image(image) for image in images]
 
 

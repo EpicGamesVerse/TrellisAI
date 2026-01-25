@@ -13,7 +13,16 @@ __attributes = {
 
 __submodules = []
 
-__all__ = list(__attributes.keys()) + __submodules
+__all__ = [
+    "SparseStructureEncoder",
+    "SparseStructureDecoder",
+    "SparseStructureFlowModel",
+    "SLatEncoder",
+    "SLatGaussianDecoder",
+    "SLatRadianceFieldDecoder",
+    "SLatMeshDecoder",
+    "SLatFlowModel",
+]
 
 def __getattr__(name):
     if name not in globals():

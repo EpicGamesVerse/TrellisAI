@@ -37,7 +37,7 @@ def download(metadata, output_dir, **kwargs):
     with tarfile.open(os.path.join(output_dir, 'raw', 'abo-3dmodels.tar')) as tar:
         with ThreadPoolExecutor(max_workers=1) as executor, \
             tqdm(total=len(metadata), desc="Extracting") as pbar:
-            def worker(instance: str) -> str:
+            def worker(instance: str) -> str | None:
                 try:
                     tar.extract(f"3dmodels/original/{instance}", path=os.path.join(output_dir, 'raw'))
                     sha256 = get_file_hash(os.path.join(output_dir, 'raw/3dmodels/original', instance))

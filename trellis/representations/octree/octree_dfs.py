@@ -67,6 +67,16 @@ class DfsOctree:
         self.primitive = primitive
         self.primitive_config = primitive_config
 
+        self.voxel_config = DEFAULT_VOXEL_CONFIG.copy()
+        self.trivec_config = DEFAULT_TRIVEC_CONFIG.copy()
+        self.decoupoly_config = DEFAULT_DECOPOLY_CONFIG.copy()
+        if primitive == 'voxel':
+            self.voxel_config.update(primitive_config)
+        elif primitive == 'trivec':
+            self.trivec_config.update(primitive_config)
+        elif primitive == 'decoupoly':
+            self.decoupoly_config.update(primitive_config)
+
         self.structure = torch.tensor([[8, 1, 0]], dtype=torch.int32, device=self.device)
         self.position = torch.zeros((8, 3), dtype=torch.float32, device=self.device)
         self.depth = torch.zeros((8, 1), dtype=torch.uint8, device=self.device)
@@ -83,7 +93,7 @@ class DfsOctree:
             self.features_ac = torch.zeros((8, (sh_degree+1)**2-1, 3), dtype=torch.float32, device=self.device)
             self.data += ['features_dc', 'features_ac']
             self.param_names += ['features_dc', 'features_ac']
-            if not primitive_config.get('solid', False):
+            if not self.voxel_config.get('solid', False):
                 self.density = torch.zeros((8, 1), dtype=torch.float32, device=self.device)
                 self.data.append('density')
                 self.param_names.append('density')
@@ -94,19 +104,21 @@ class DfsOctree:
             self.data += ['features_dc', 'features_ac', 'opacity']
             self.param_names += ['features_dc', 'features_ac', 'opacity']
         elif primitive == 'trivec':
-            self.trivec = torch.zeros((8, primitive_config['rank'], 3, primitive_config['dim']), dtype=torch.float32, device=self.device)
-            self.density = torch.zeros((8, primitive_config['rank']), dtype=torch.float32, device=self.device)
-            self.features_dc = torch.zeros((8, primitive_config['rank'], 1, 3), dtype=torch.float32, device=self.device)
-            self.features_ac = torch.zeros((8, primitive_config['rank'], (sh_degree+1)**2-1, 3), dtype=torch.float32, device=self.device)
+            cfg = self.trivec_config
+            self.trivec = torch.zeros((8, cfg['rank'], 3, cfg['dim']), dtype=torch.float32, device=self.device)
+            self.density = torch.zeros((8, cfg['rank']), dtype=torch.float32, device=self.device)
+            self.features_dc = torch.zeros((8, cfg['rank'], 1, 3), dtype=torch.float32, device=self.device)
+            self.features_ac = torch.zeros((8, cfg['rank'], (sh_degree+1)**2-1, 3), dtype=torch.float32, device=self.device)
             self.density_shift = 0
             self.data += ['trivec', 'density', 'features_dc', 'features_ac']
             self.param_names += ['trivec', 'density', 'features_dc', 'features_ac']
         elif primitive == 'decoupoly':
-            self.decoupoly_V = torch.zeros((8, primitive_config['rank'], 3), dtype=torch.float32, device=self.device)
-            self.decoupoly_g = torch.zeros((8, primitive_config['rank'], primitive_config['degree']), dtype=torch.float32, device=self.device)
-            self.density = torch.zeros((8, primitive_config['rank']), dtype=torch.float32, device=self.device)
-            self.features_dc = torch.zeros((8, primitive_config['rank'], 1, 3), dtype=torch.float32, device=self.device)
-            self.features_ac = torch.zeros((8, primitive_config['rank'], (sh_degree+1)**2-1, 3), dtype=torch.float32, device=self.device)
+            cfg = self.decoupoly_config
+            self.decoupoly_V = torch.zeros((8, cfg['rank'], 3), dtype=torch.float32, device=self.device)
+            self.decoupoly_g = torch.zeros((8, cfg['rank'], cfg['degree']), dtype=torch.float32, device=self.device)
+            self.density = torch.zeros((8, cfg['rank']), dtype=torch.float32, device=self.device)
+            self.features_dc = torch.zeros((8, cfg['rank'], 1, 3), dtype=torch.float32, device=self.device)
+            self.features_ac = torch.zeros((8, cfg['rank'], (sh_degree+1)**2-1, 3), dtype=torch.float32, device=self.device)
             self.density_shift = 0
             self.data += ['decoupoly_V', 'decoupoly_g', 'density', 'features_dc', 'features_ac']
             self.param_names += ['decoupoly_V', 'decoupoly_g', 'density', 'features_dc', 'features_ac']
@@ -163,7 +175,8 @@ class DfsOctree:
 
     @property
     def get_color(self):
-        return self.color_activation(self.colors)
+        colors = self.features_dc.squeeze(-2)
+        return self.color_activation(colors)
 
     @property
     def get_features(self):
@@ -262,7 +275,7 @@ class DfsOctree:
         mem_offset.index_add_(0, self.structure[structre_valid, 1], structre_ctrl[structre_valid])  # Add the new nodes.
         mem_offset[:-1] -= structre_delete.int()                                                    # Delete the merged nodes.
         new_structre_idx = torch.arange(0, self.num_non_leaf_nodes + 1, dtype=torch.int32, device=self.device) + mem_offset.cumsum(0)
-        new_structure_length = new_structre_idx[-1].item()
+        new_structure_length = int(new_structre_idx[-1].item())
         new_structre_idx = new_structre_idx[:-1]
         new_structure = torch.empty((new_structure_length, 3), dtype=torch.int32, device=self.device)
         new_structure[new_structre_idx[structre_valid], 0] = new_leaf_num[structre_valid]
@@ -271,7 +284,7 @@ class DfsOctree:
         new_node_mask = torch.ones((new_structure_length,), dtype=torch.bool, device=self.device)
         new_node_mask[new_structre_idx[structre_valid]] = False
         new_structure[new_node_mask, 0] = 8                                                         # Initialize to all leaf nodes.
-        new_node_num = new_node_mask.sum().item()
+        new_node_num = int(new_node_mask.sum().item())
 
         # Rebuild child ptr.
         non_leaf_cnt = 8 - new_structure[:, 0]
@@ -293,7 +306,7 @@ class DfsOctree:
         mem_offset[:-1] -= merge_mask.int()                                                                                             # Delete data elements for merge nodes
         mem_offset.index_add_(0, self.structure[structre_valid, 2], merged_nodes[structre_valid])                                       # Add data elements for merge nodes
         new_data_idx = torch.arange(0, self.num_leaf_nodes + 1, dtype=torch.int32, device=self.device) + mem_offset.cumsum(0)
-        new_data_length = new_data_idx[-1].item()
+        new_data_length = int(new_data_idx[-1].item())
         new_data_idx = new_data_idx[:-1]
         new_data = {data: torch.empty((new_data_length,) + getattr(self, data).shape[1:], dtype=getattr(self, data).dtype, device=self.device) for data in self.data}
         for data in self.data:
@@ -328,7 +341,7 @@ class DfsOctree:
                         new_data[data][subdivide_data_ptr + i] = getattr(self, data)[subdivide_mask]
         ## For merge nodes
         if merge_mask.sum() > 0:
-            merge_data_ptr = torch.empty((merged_nodes.sum().item(),), dtype=torch.int32, device=self.device)
+            merge_data_ptr = torch.empty((int(merged_nodes.sum().item()),), dtype=torch.int32, device=self.device)
             merge_nodes_cumsum = torch.cat([torch.zeros((1,), dtype=torch.int32, device=self.device), merged_nodes.cumsum(0)[:-1]])
             for i in range(8):
                 merge_data_ptr[merge_nodes_cumsum[merged_nodes > i] + i] = new_structure[new_structre_idx[merged_nodes > i], 2] + i
@@ -340,7 +353,7 @@ class DfsOctree:
                 elif data == 'depth':
                     new_data['depth'][merge_data_ptr] = self.depth[old_merge_data_ptr] - 1
                 elif data == 'opacity':
-                    new_data['opacity'][subdivide_data_ptr + i] = self.inverse_opacity_activation(self.opacity_activation(self.opacity[subdivide_mask])**2)
+                    new_data['opacity'][merge_data_ptr] = self.inverse_opacity_activation(self.opacity_activation(self.opacity[old_merge_data_ptr]) ** 2)
                 elif data == 'trivec':
                     new_data['trivec'][merge_data_ptr] = self.trivec[old_merge_data_ptr]
                 else:

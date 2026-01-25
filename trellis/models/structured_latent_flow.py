@@ -1,4 +1,6 @@
-from typing import *
+from __future__ import annotations
+
+from typing import Any, List, Literal, Optional, cast
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -75,11 +77,11 @@ class SLatFlowModel(nn.Module):
         out_channels: int,
         num_blocks: int,
         num_heads: Optional[int] = None,
-        num_head_channels: Optional[int] = 64,
+        num_head_channels: int = 64,
         mlp_ratio: float = 4,
         patch_size: int = 2,
         num_io_res_blocks: int = 2,
-        io_block_channels: List[int] = None,
+        io_block_channels: Optional[List[int]] = None,
         pe_mode: Literal["ape", "rope"] = "ape",
         use_fp16: bool = False,
         use_checkpoint: bool = False,
@@ -99,6 +101,9 @@ class SLatFlowModel(nn.Module):
         self.mlp_ratio = mlp_ratio
         self.patch_size = patch_size
         self.num_io_res_blocks = num_io_res_blocks
+        if io_block_channels is None:
+            io_stages = int(np.log2(patch_size))
+            io_block_channels = [model_channels] * io_stages
         self.io_block_channels = io_block_channels
         self.pe_mode = pe_mode
         self.use_fp16 = use_fp16
@@ -215,17 +220,24 @@ class SLatFlowModel(nn.Module):
         self.apply(_basic_init)
 
         # Initialize timestep embedding MLP:
-        nn.init.normal_(self.t_embedder.mlp[0].weight, std=0.02)
-        nn.init.normal_(self.t_embedder.mlp[2].weight, std=0.02)
+        mlp0 = cast(nn.Linear, self.t_embedder.mlp[0])
+        mlp2 = cast(nn.Linear, self.t_embedder.mlp[2])
+        nn.init.normal_(mlp0.weight, std=0.02)
+        nn.init.normal_(mlp2.weight, std=0.02)
 
         # Zero-out adaLN modulation layers in DiT blocks:
         if self.share_mod:
-            nn.init.constant_(self.adaLN_modulation[-1].weight, 0)
-            nn.init.constant_(self.adaLN_modulation[-1].bias, 0)
+            ada = cast(nn.Sequential, self.adaLN_modulation)
+            last = cast(nn.Linear, ada[-1])
+            nn.init.constant_(last.weight, 0)
+            nn.init.constant_(last.bias, 0)
         else:
             for block in self.blocks:
-                nn.init.constant_(block.adaLN_modulation[-1].weight, 0)
-                nn.init.constant_(block.adaLN_modulation[-1].bias, 0)
+                block_any = cast(Any, block)
+                ada = cast(nn.Sequential, block_any.adaLN_modulation)
+                last = cast(nn.Linear, ada[-1])
+                nn.init.constant_(last.weight, 0)
+                nn.init.constant_(last.bias, 0)
 
         # Zero-out output layers:
         nn.init.constant_(self.out_layer.weight, 0)

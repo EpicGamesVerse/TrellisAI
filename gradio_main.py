@@ -2,18 +2,22 @@ import os
 import sys
 sys.path.append(os.getcwd())
 
+import importlib
 
-try:  # Try to import xformers, or use the faster one (flash-attn) if they weren't installed
-    import xformers  # pyright: ignore[reportMissingImports]
+
+try:  # Prefer xformers if available; otherwise fall back to flash-attn.
+    importlib.import_module("xformers")
     os.environ['ATTN_BACKEND'] = 'xformers'
-except ImportError:
+except Exception:
     os.environ['ATTN_BACKEND'] = 'flash-attn'
 
 os.environ['SPCONV_ALGO'] = 'native' 
 
-import torch  # pyright: ignore[reportMissingImports]
-import numpy as np  # pyright: ignore[reportMissingImports]
+import torch
+import numpy as np
 from trellis.pipelines import TrellisImageTo3DPipeline
+from typing import Any, cast
+
 
 from version import code_version
 
@@ -67,7 +71,7 @@ def initialize_pipeline(precision="full"):
     print(f"used precision: '{precision}'.  Loading...")
     print(f"Trellis repo version {code_version}")
     if precision == "half" or precision=="float16":
-        pipeline.to(torch.float16) #cuts memory usage in half
+        cast(Any, pipeline).to(torch.float16) #cuts memory usage in half
         if "image_cond_model" in pipeline.models:
             pipeline.models['image_cond_model'].half()  #cuts memory usage in half
     # DO NOT MOVE TO CUDA YET. We'll be dynamically loading parts between 'cpu' and 'cuda' soon.

@@ -1,4 +1,7 @@
-from typing import *
+from __future__ import annotations
+
+from typing import List, Tuple, Union, cast
+
 import torch
 import math
 from .. import SparseTensor
@@ -82,7 +85,10 @@ def sparse_windowed_scaled_dot_product_self_attention(
         fwd_indices, bwd_indices, seq_lens, seq_batch_indices = calc_window_partition(qkv, window_size, shift_window)
         qkv.register_spatial_cache(serialization_spatial_cache_name, (fwd_indices, bwd_indices, seq_lens, seq_batch_indices))
     else:
-        fwd_indices, bwd_indices, seq_lens, seq_batch_indices = serialization_spatial_cache
+        fwd_indices, bwd_indices, seq_lens, seq_batch_indices = cast(
+            Tuple[torch.Tensor, torch.Tensor, List[int], List[int]],
+            serialization_spatial_cache,
+        )
 
     M = fwd_indices.shape[0]
     T = qkv.feats.shape[0]
@@ -101,6 +107,7 @@ def sparse_windowed_scaled_dot_product_self_attention(
                     f"SparseWindowedScaledDotProductSelfAttention: window size exceeded"
             start += seq_lens[i]
 
+    out: torch.Tensor
     if all([seq_len == window_size for seq_len in seq_lens]):
         B = len(seq_lens)
         N = window_size
@@ -109,7 +116,7 @@ def sparse_windowed_scaled_dot_product_self_attention(
             q, k, v = qkv_feats.unbind(dim=2)                       # [B, N, H, C]
             out = xops.memory_efficient_attention(q, k, v)          # [B, N, H, C]
         elif ATTN == 'flash_attn':
-            out = flash_attn.flash_attn_qkvpacked_func(qkv_feats)   # [B, N, H, C]
+            out = cast(torch.Tensor, flash_attn.flash_attn_qkvpacked_func(qkv_feats))   # [B, N, H, C]
         else:
             raise ValueError(f"Unknown attention module: {ATTN}")
         out = out.reshape(B * N, H, C)                              # [M, H, C]
@@ -124,7 +131,9 @@ def sparse_windowed_scaled_dot_product_self_attention(
         elif ATTN == 'flash_attn':
             cu_seqlens = torch.cat([torch.tensor([0]), torch.cumsum(torch.tensor(seq_lens), dim=0)], dim=0) \
                         .to(qkv.device).int()
-            out = flash_attn.flash_attn_varlen_qkvpacked_func(qkv_feats, cu_seqlens, max(seq_lens)) # [M, H, C]
+            out = cast(torch.Tensor, flash_attn.flash_attn_varlen_qkvpacked_func(qkv_feats, cu_seqlens, max(seq_lens))) # [M, H, C]
+        else:
+            raise ValueError(f"Unknown attention module: {ATTN}")
 
     out = out[bwd_indices]      # [T, H, C]
 

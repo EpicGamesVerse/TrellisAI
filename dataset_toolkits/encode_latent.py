@@ -12,6 +12,8 @@ from easydict import EasyDict as edict
 from concurrent.futures import ThreadPoolExecutor
 from queue import Queue
 
+from typing import Any, cast
+
 import trellis.models as models
 import trellis.modules.sparse as sp
 
@@ -42,45 +44,56 @@ if __name__ == '__main__':
     opt = parser.parse_args()
     opt = edict(vars(opt))
 
-    if opt.enc_model is None:
-        latent_name = f'{opt.feat_model}_{opt.enc_pretrained.split("/")[-1]}'
-        encoder = models.from_pretrained(opt.enc_pretrained).eval().cuda()
+    opt_any = cast(Any, opt)
+    output_dir: str = str(opt_any.output_dir)
+
+    if opt_any.enc_model is None:
+        feat_model = str(opt_any.feat_model)
+        enc_pretrained = str(opt_any.enc_pretrained)
+        latent_name = f'{feat_model}_{enc_pretrained.split("/")[-1]}'
+        encoder = models.from_pretrained(enc_pretrained).eval().cuda()
     else:
-        latent_name = f'{opt.feat_model}_{opt.enc_model}_{opt.ckpt}'
-        cfg = edict(json.load(open(os.path.join(opt.model_root, opt.enc_model, 'config.json'), 'r')))
-        encoder = getattr(models, cfg.models.encoder.name)(**cfg.models.encoder.args).cuda()
-        ckpt_path = os.path.join(opt.model_root, opt.enc_model, 'ckpts', f'encoder_{opt.ckpt}.pt')
+        feat_model = str(opt_any.feat_model)
+        enc_model = str(opt_any.enc_model)
+        ckpt = str(opt_any.ckpt)
+        model_root = str(opt_any.model_root)
+        latent_name = f'{feat_model}_{enc_model}_{ckpt}'
+        cfg = edict(json.load(open(os.path.join(model_root, enc_model, 'config.json'), 'r')))
+        cfg_any = cast(Any, cfg)
+        encoder = getattr(models, cfg_any.models.encoder.name)(**cfg_any.models.encoder.args).cuda()
+        ckpt_path = os.path.join(model_root, enc_model, 'ckpts', f'encoder_{ckpt}.pt')
         encoder.load_state_dict(torch.load(ckpt_path), strict=False)
         encoder.eval()
         print(f'Loaded model from {ckpt_path}')
     
-    os.makedirs(os.path.join(opt.output_dir, 'latents', latent_name), exist_ok=True)
+    os.makedirs(os.path.join(output_dir, 'latents', latent_name), exist_ok=True)
 
     # get file list
-    if os.path.exists(os.path.join(opt.output_dir, 'metadata.csv')):
-        metadata = pd.read_csv(os.path.join(opt.output_dir, 'metadata.csv'))
+    if os.path.exists(os.path.join(output_dir, 'metadata.csv')):
+        metadata = pd.read_csv(os.path.join(output_dir, 'metadata.csv'))
     else:
         raise ValueError('metadata.csv not found')
-    if opt.instances is not None:
-        with open(opt.instances, 'r') as f:
+    if opt_any.instances is not None:
+        with open(str(opt_any.instances), 'r') as f:
             sha256s = [line.strip() for line in f]
         metadata = metadata[metadata['sha256'].isin(sha256s)]
     else:
-        if opt.filter_low_aesthetic_score is not None:
-            metadata = metadata[metadata['aesthetic_score'] >= opt.filter_low_aesthetic_score]
-        metadata = metadata[metadata[f'feature_{opt.feat_model}'] == True]
+        if opt_any.filter_low_aesthetic_score is not None:
+            metadata = metadata[metadata['aesthetic_score'] >= float(opt_any.filter_low_aesthetic_score)]
+        feat_model = str(opt_any.feat_model)
+        metadata = metadata[metadata[f'feature_{feat_model}'] == True]
         if f'latent_{latent_name}' in metadata.columns:
             metadata = metadata[metadata[f'latent_{latent_name}'] == False]
 
-    start = len(metadata) * opt.rank // opt.world_size
-    end = len(metadata) * (opt.rank + 1) // opt.world_size
+    start = len(metadata) * int(opt_any.rank) // int(opt_any.world_size)
+    end = len(metadata) * (int(opt_any.rank) + 1) // int(opt_any.world_size)
     metadata = metadata[start:end]
     records = []
     
     # filter out objects that are already processed
     sha256s = list(metadata['sha256'].values)
     for sha256 in copy.copy(sha256s):
-        if os.path.exists(os.path.join(opt.output_dir, 'latents', latent_name, f'{sha256}.npz')):
+        if os.path.exists(os.path.join(output_dir, 'latents', latent_name, f'{sha256}.npz')):
             records.append({'sha256': sha256, f'latent_{latent_name}': True})
             sha256s.remove(sha256)
 
@@ -91,14 +104,14 @@ if __name__ == '__main__':
             ThreadPoolExecutor(max_workers=32) as saver_executor:
             def loader(sha256):
                 try:
-                    feats = np.load(os.path.join(opt.output_dir, 'features', opt.feat_model, f'{sha256}.npz'))
+                    feats = np.load(os.path.join(output_dir, 'features', str(opt_any.feat_model), f'{sha256}.npz'))
                     load_queue.put((sha256, feats))
                 except Exception as e:
                     print(f"Error loading features for {sha256}: {e}")
             loader_executor.map(loader, sha256s)
             
             def saver(sha256, pack):
-                save_path = os.path.join(opt.output_dir, 'latents', latent_name, f'{sha256}.npz')
+                save_path = os.path.join(output_dir, 'latents', latent_name, f'{sha256}.npz')
                 np.savez_compressed(save_path, **pack)
                 records.append({'sha256': sha256, f'latent_{latent_name}': True})
                 
@@ -123,5 +136,5 @@ if __name__ == '__main__':
     except:
         print("Error happened during processing.")
         
-    records = pd.DataFrame.from_records(records)
-    records.to_csv(os.path.join(opt.output_dir, f'latent_{latent_name}_{opt.rank}.csv'), index=False)
+    records_df = pd.DataFrame.from_records(records)
+    records_df.to_csv(os.path.join(output_dir, f'latent_{latent_name}_{int(opt_any.rank)}.csv'), index=False)

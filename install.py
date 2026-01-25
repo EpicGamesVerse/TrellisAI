@@ -238,9 +238,13 @@ def install_dependencies():
 def verify_installation():
     """Verify that critical packages were installed correctly."""
     try:
-        import torch # pyright: ignore[reportMissingImports]
-        import gradio # pyright: ignore[reportMissingImports]
-        import kaolin # pyright: ignore[reportMissingImports]
+        import importlib
+
+        import torch
+        import gradio
+
+        # Optional dependency in some setups.
+        kaolin = importlib.import_module("kaolin")
         print(f"PyTorch version: {torch.__version__}")
         print(f"Gradio version: {gradio.__version__}")
         print(f"Kaolin version: {kaolin.__version__}")

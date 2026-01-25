@@ -1,6 +1,7 @@
-from typing import *
+from typing import Literal, Optional, Tuple, Union, cast
 import torch
 import torch.nn as nn
+from torch.utils.checkpoint import checkpoint
 from ..attention import MultiHeadAttention
 from ..norm import LayerNorm32
 
@@ -70,7 +71,7 @@ class TransformerBlock(nn.Module):
         mlp_ratio: float = 4.0,
         attn_mode: Literal["full", "windowed"] = "full",
         window_size: Optional[int] = None,
-        shift_window: Optional[int] = None,
+        shift_window: Optional[Union[int, Tuple[int, int, int]]] = None,
         use_checkpoint: bool = False,
         use_rope: bool = False,
         qk_rms_norm: bool = False,
@@ -86,7 +87,7 @@ class TransformerBlock(nn.Module):
             num_heads=num_heads,
             attn_mode=attn_mode,
             window_size=window_size,
-            shift_window=shift_window,
+            shift_window=(shift_window, shift_window, shift_window) if isinstance(shift_window, int) else shift_window,
             qkv_bias=qkv_bias,
             use_rope=use_rope,
             qk_rms_norm=qk_rms_norm,
@@ -107,7 +108,7 @@ class TransformerBlock(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         if self.use_checkpoint:
-            return torch.utils.checkpoint.checkpoint(self._forward, x, use_reentrant=False)
+            return cast(torch.Tensor, checkpoint(self._forward, x, use_reentrant=False))
         else:
             return self._forward(x)
 
@@ -176,7 +177,7 @@ class TransformerCrossBlock(nn.Module):
 
     def forward(self, x: torch.Tensor, context: torch.Tensor):
         if self.use_checkpoint:
-            return torch.utils.checkpoint.checkpoint(self._forward, x, context, use_reentrant=False)
+            return checkpoint(self._forward, x, context, use_reentrant=False)
         else:
             return self._forward(x, context)
         

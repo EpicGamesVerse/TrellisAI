@@ -15,14 +15,16 @@ from queue import Queue
 
 import trellis.models as models
 
+from typing import Any, cast
+
 
 torch.set_grad_enabled(False)
 
 
-def get_voxels(instance):
-    position = utils3d.io.read_ply(os.path.join(opt.output_dir, 'voxels', f'{instance}.ply'))[0]
-    coords = ((torch.tensor(position) + 0.5) * opt.resolution).int().contiguous()
-    ss = torch.zeros(1, opt.resolution, opt.resolution, opt.resolution, dtype=torch.long)
+def get_voxels(instance: str, output_dir: str, resolution: int) -> torch.Tensor:
+    position = utils3d.io.read_ply(os.path.join(output_dir, 'voxels', f'{instance}.ply'))[0]
+    coords = ((torch.tensor(position) + 0.5) * resolution).int().contiguous()
+    ss = torch.zeros(1, resolution, resolution, resolution, dtype=torch.long)
     ss[:, coords[:, 0], coords[:, 1], coords[:, 2]] = 1
     return ss
 
@@ -50,45 +52,54 @@ if __name__ == '__main__':
     opt = parser.parse_args()
     opt = edict(vars(opt))
 
-    if opt.enc_model is None:
-        latent_name = f'{opt.enc_pretrained.split("/")[-1]}'
-        encoder = models.from_pretrained(opt.enc_pretrained).eval().cuda()
+    opt_any = cast(Any, opt)
+    output_dir: str = str(opt_any.output_dir)
+    resolution: int = int(opt_any.resolution)
+
+    if opt_any.enc_model is None:
+        enc_pretrained = str(opt_any.enc_pretrained)
+        latent_name = f'{enc_pretrained.split("/")[-1]}'
+        encoder = models.from_pretrained(enc_pretrained).eval().cuda()
     else:
-        latent_name = f'{opt.enc_model}_{opt.ckpt}'
-        cfg = edict(json.load(open(os.path.join(opt.model_root, opt.enc_model, 'config.json'), 'r')))
-        encoder = getattr(models, cfg.models.encoder.name)(**cfg.models.encoder.args).cuda()
-        ckpt_path = os.path.join(opt.model_root, opt.enc_model, 'ckpts', f'encoder_{opt.ckpt}.pt')
+        enc_model = str(opt_any.enc_model)
+        ckpt = str(opt_any.ckpt)
+        model_root = str(opt_any.model_root)
+        latent_name = f'{enc_model}_{ckpt}'
+        cfg = edict(json.load(open(os.path.join(model_root, enc_model, 'config.json'), 'r')))
+        cfg_any = cast(Any, cfg)
+        encoder = getattr(models, cfg_any.models.encoder.name)(**cfg_any.models.encoder.args).cuda()
+        ckpt_path = os.path.join(model_root, enc_model, 'ckpts', f'encoder_{ckpt}.pt')
         encoder.load_state_dict(torch.load(ckpt_path), strict=False)
         encoder.eval()
         print(f'Loaded model from {ckpt_path}')
     
-    os.makedirs(os.path.join(opt.output_dir, 'ss_latents', latent_name), exist_ok=True)
+    os.makedirs(os.path.join(output_dir, 'ss_latents', latent_name), exist_ok=True)
 
     # get file list
-    if os.path.exists(os.path.join(opt.output_dir, 'metadata.csv')):
-        metadata = pd.read_csv(os.path.join(opt.output_dir, 'metadata.csv'))
+    if os.path.exists(os.path.join(output_dir, 'metadata.csv')):
+        metadata = pd.read_csv(os.path.join(output_dir, 'metadata.csv'))
     else:
         raise ValueError('metadata.csv not found')
-    if opt.instances is not None:
-        with open(opt.instances, 'r') as f:
+    if opt_any.instances is not None:
+        with open(str(opt_any.instances), 'r') as f:
             instances = f.read().splitlines()
         metadata = metadata[metadata['sha256'].isin(instances)]
     else:
-        if opt.filter_low_aesthetic_score is not None:
-            metadata = metadata[metadata['aesthetic_score'] >= opt.filter_low_aesthetic_score]
+        if opt_any.filter_low_aesthetic_score is not None:
+            metadata = metadata[metadata['aesthetic_score'] >= float(opt_any.filter_low_aesthetic_score)]
         metadata = metadata[metadata['voxelized'] == True]
         if f'ss_latent_{latent_name}' in metadata.columns:
             metadata = metadata[metadata[f'ss_latent_{latent_name}'] == False]
 
-    start = len(metadata) * opt.rank // opt.world_size
-    end = len(metadata) * (opt.rank + 1) // opt.world_size
+    start = len(metadata) * int(opt_any.rank) // int(opt_any.world_size)
+    end = len(metadata) * (int(opt_any.rank) + 1) // int(opt_any.world_size)
     metadata = metadata[start:end]
     records = []
     
     # filter out objects that are already processed
     sha256s = list(metadata['sha256'].values)
     for sha256 in copy.copy(sha256s):
-        if os.path.exists(os.path.join(opt.output_dir, 'ss_latents', latent_name, f'{sha256}.npz')):
+        if os.path.exists(os.path.join(output_dir, 'ss_latents', latent_name, f'{sha256}.npz')):
             records.append({'sha256': sha256, f'ss_latent_{latent_name}': True})
             sha256s.remove(sha256)
 
@@ -99,14 +110,14 @@ if __name__ == '__main__':
             ThreadPoolExecutor(max_workers=32) as saver_executor:
             def loader(sha256):
                 try:
-                    ss = get_voxels(sha256)[None].float()
+                    ss = get_voxels(sha256, output_dir=output_dir, resolution=resolution)[None].float()
                     load_queue.put((sha256, ss))
                 except Exception as e:
                     print(f"Error loading features for {sha256}: {e}")
             loader_executor.map(loader, sha256s)
             
             def saver(sha256, pack):
-                save_path = os.path.join(opt.output_dir, 'ss_latents', latent_name, f'{sha256}.npz')
+                save_path = os.path.join(output_dir, 'ss_latents', latent_name, f'{sha256}.npz')
                 np.savez_compressed(save_path, **pack)
                 records.append({'sha256': sha256, f'ss_latent_{latent_name}': True})
                 
@@ -124,5 +135,5 @@ if __name__ == '__main__':
     except:
         print("Error happened during processing.")
         
-    records = pd.DataFrame.from_records(records)
-    records.to_csv(os.path.join(opt.output_dir, f'ss_latent_{latent_name}_{opt.rank}.csv'), index=False)
+    records_df = pd.DataFrame.from_records(records)
+    records_df.to_csv(os.path.join(output_dir, f'ss_latent_{latent_name}_{int(opt_any.rank)}.csv'), index=False)

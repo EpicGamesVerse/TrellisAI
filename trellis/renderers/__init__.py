@@ -8,7 +8,11 @@ __attributes = {
 
 __submodules = []
 
-__all__ = list(__attributes.keys()) + __submodules
+__all__ = [
+    'OctreeRenderer',
+    'GaussianRenderer',
+    'MeshRenderer',
+]
 
 def __getattr__(name):
     if name not in globals():

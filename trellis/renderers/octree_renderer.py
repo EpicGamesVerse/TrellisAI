@@ -4,6 +4,7 @@ import torch.nn.functional as F
 import math
 import cv2
 from scipy.stats import qmc
+from typing import Any, Optional, cast
 from easydict import EasyDict as edict
 from ..representations.octree import DfsOctree
 
@@ -203,7 +204,7 @@ class OctreeRenderer:
             octree: DfsOctree,
             extrinsics: torch.Tensor,
             intrinsics: torch.Tensor,
-            colors_overwrite: torch.Tensor = None,
+            colors_overwrite: Optional[torch.Tensor] = None,
         ) -> edict:
         """
         Render the octree.
@@ -233,9 +234,9 @@ class OctreeRenderer:
             text_bbox = cv2.getTextSize("Unsupported", cv2.FONT_HERSHEY_SIMPLEX, 2, 3)[0]
             origin = (512 - text_bbox[0]) // 2, (512 - text_bbox[1]) // 2
             image = cv2.putText(image, "Unsupported", origin, cv2.FONT_HERSHEY_SIMPLEX, 2, (255, 255, 255), 3, cv2.LINE_AA)
-            return {
+            return edict({
                 'color': torch.tensor(image, dtype=torch.float32).permute(2, 0, 1) / 255,
-            }
+            })
         
         if self.rendering_options["bg_color"] == 'random':
             self.bg_color = torch.zeros(3, dtype=torch.float32, device="cuda")
@@ -277,24 +278,36 @@ class OctreeRenderer:
         })
 
         # Render
-        render_ret = render(camera_dict, octree, self.pipe, self.bg_color, aux=aux, colors_overwrite=colors_overwrite, scaling_modifier=self.pipe.scale_modifier, used_rank=self.pipe.used_rank, halton_sampler=self.halton_sampler)
+        pipe_any = cast(Any, self.pipe)
+        render_ret = render(
+            camera_dict,
+            octree,
+            self.pipe,
+            self.bg_color,
+            aux=aux,
+            colors_overwrite=colors_overwrite,
+            scaling_modifier=pipe_any.scale_modifier,
+            used_rank=pipe_any.used_rank,
+            halton_sampler=self.halton_sampler,
+        )
+        render_ret_any = cast(Any, render_ret)
 
         if ssaa > 1:
-            render_ret.rgb = F.interpolate(render_ret.rgb[None], size=(resolution, resolution), mode='bilinear', align_corners=False, antialias=True).squeeze()
-            render_ret.depth = F.interpolate(render_ret.depth[None, None], size=(resolution, resolution), mode='bilinear', align_corners=False, antialias=True).squeeze()
-            render_ret.alpha = F.interpolate(render_ret.alpha[None, None], size=(resolution, resolution), mode='bilinear', align_corners=False, antialias=True).squeeze()
-            if hasattr(render_ret, 'percent_depth'):
-                render_ret.percent_depth = F.interpolate(render_ret.percent_depth[None, None], size=(resolution, resolution), mode='bilinear', align_corners=False, antialias=True).squeeze()
+            render_ret_any.rgb = F.interpolate(render_ret_any.rgb[None], size=(resolution, resolution), mode='bilinear', align_corners=False, antialias=True).squeeze()
+            render_ret_any.depth = F.interpolate(render_ret_any.depth[None, None], size=(resolution, resolution), mode='bilinear', align_corners=False, antialias=True).squeeze()
+            render_ret_any.alpha = F.interpolate(render_ret_any.alpha[None, None], size=(resolution, resolution), mode='bilinear', align_corners=False, antialias=True).squeeze()
+            if hasattr(render_ret_any, 'percent_depth'):
+                render_ret_any.percent_depth = F.interpolate(render_ret_any.percent_depth[None, None], size=(resolution, resolution), mode='bilinear', align_corners=False, antialias=True).squeeze()
 
         ret = edict({
-            'color': render_ret.rgb,
-            'depth': render_ret.depth,
-            'alpha': render_ret.alpha,
+            'color': render_ret_any.rgb,
+            'depth': render_ret_any.depth,
+            'alpha': render_ret_any.alpha,
         })
         if self.pipe["with_distloss"] and 'distloss' in render_ret:
-            ret['distloss'] = render_ret.distloss
+            ret['distloss'] = render_ret_any.distloss
         if self.pipe["with_aux"]:
             ret['aux'] = aux
-        if hasattr(render_ret, 'percent_depth'):
-            ret['percent_depth'] = render_ret.percent_depth
+        if hasattr(render_ret_any, 'percent_depth'):
+            ret['percent_depth'] = render_ret_any.percent_depth
         return ret

@@ -1,12 +1,26 @@
-from typing import *
+from __future__ import annotations
+
+from typing import Any, Tuple
+
+from .base import Sampler
 
 
-class GuidanceIntervalSamplerMixin:
+class GuidanceIntervalSamplerMixin(Sampler):
     """
     A mixin class for samplers that apply classifier-free guidance with interval.
     """
 
-    def _inference_model(self, model, x_t, t, cond, neg_cond, cfg_strength, cfg_interval, **kwargs):
+    def _inference_model(
+        self,
+        model: Any,
+        x_t: Any,
+        t: float,
+        cond: Any,
+        neg_cond: Any,
+        cfg_strength: float,
+        cfg_interval: Tuple[float, float],
+        **kwargs: Any,
+    ) -> Any:
         if cfg_interval[0] <= t <= cfg_interval[1]:
             pred = super()._inference_model(model, x_t, t, cond, **kwargs)
             neg_pred = super()._inference_model(model, x_t, t, neg_cond, **kwargs)

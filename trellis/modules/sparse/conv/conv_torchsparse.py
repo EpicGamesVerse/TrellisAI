@@ -1,13 +1,14 @@
 import torch
 import torch.nn as nn
+import importlib
+from typing import Any, cast
 from .. import SparseTensor
 
 
 class SparseConv3d(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size, stride=1, dilation=1, bias=True, indice_key=None):
         super(SparseConv3d, self).__init__()
-        if 'torchsparse' not in globals():
-            import torchsparse
+        torchsparse = cast(Any, importlib.import_module("torchsparse"))
         self.conv = torchsparse.nn.Conv3d(in_channels, out_channels, kernel_size, stride, 0, dilation, bias)
 
     def forward(self, x: SparseTensor) -> SparseTensor:
@@ -22,8 +23,7 @@ class SparseConv3d(nn.Module):
 class SparseInverseConv3d(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size, stride=1, dilation=1, bias=True, indice_key=None):
         super(SparseInverseConv3d, self).__init__()
-        if 'torchsparse' not in globals():
-            import torchsparse
+        torchsparse = cast(Any, importlib.import_module("torchsparse"))
         self.conv = torchsparse.nn.Conv3d(in_channels, out_channels, kernel_size, stride, 0, dilation, bias, transposed=True)
 
     def forward(self, x: SparseTensor) -> SparseTensor:
