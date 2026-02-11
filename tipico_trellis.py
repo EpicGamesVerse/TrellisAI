@@ -4,6 +4,7 @@ sys.path.append(os.getcwd())
 
 import importlib
 import gc
+import blender_mesh_cleanup
 from typing import Any, cast
 
 # Windows: suppress noisy asyncio Proactor transport ConnectionResetError (WinError 10054).
@@ -423,6 +424,12 @@ def extract_glb(
     glb_data = postprocessing_utils.to_glb(gs, mesh, simplify=mesh_simplify, texture_size=texture_size, verbose=True)
     glb_data.export(actual_glb_path)
 
+    # Default: clean/optimize mesh in Blender (best-effort). Keeps original GLB and exports *_clean.glb.
+    cleaned_glb_path = blender_mesh_cleanup.cleanup_glb_default(
+        actual_glb_path,
+        target_tris=15000,
+    )
+
     # No temp_reservation_path to remove here as it's based on state['filename_base']
 
     if save_metadata and glb_filename_base: 
@@ -457,7 +464,7 @@ def extract_glb(
     except Exception:
         pass
     _unload_pipeline_after_task_if_enabled()
-    return actual_glb_path, actual_glb_path
+    return cleaned_glb_path, cleaned_glb_path
 
 
 def extract_gaussian(
