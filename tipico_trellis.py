@@ -3,6 +3,7 @@ import sys
 sys.path.append(os.getcwd())
 
 import importlib
+import gc
 from typing import Any, cast
 
 # Windows: suppress noisy asyncio Proactor transport ConnectionResetError (WinError 10054).
@@ -27,7 +28,36 @@ parser.add_argument("--precision",
 parser.add_argument("--xformers", action="store_true", help="Prefer xformers attention backend if available.")
 parser.add_argument("--share", action="store_true", help="Enable Gradio live share.")
 parser.add_argument("--highvram", action="store_true", help="Keep all models in GPU memory without CPU offloading.")
+parser.add_argument("--unload-after-run", action="store_true", help="After each UI action, move models to CPU and clear CUDA cache to reduce VRAM usage.")
 cmd_args = parser.parse_args()
+
+
+def _unload_pipeline_after_task_if_enabled() -> None:
+    """Best-effort VRAM release while keeping the server running."""
+    if not getattr(cmd_args, "unload_after_run", False):
+        return
+    # High-VRAM mode intentionally pins models on GPU; unloading would be contradictory.
+    if getattr(cmd_args, "highvram", False):
+        return
+    try:
+        if "pipeline" in globals() and globals().get("pipeline") is not None:
+            p = globals()["pipeline"]
+            if hasattr(p, "_move_all_models_to_cpu"):
+                p._move_all_models_to_cpu()
+            # Release background-removal session (can hold memory in some configs)
+            if hasattr(p, "rembg_session"):
+                p.rembg_session = None
+    except Exception as e:
+        print(f"[WARN] Unload-after-run failed: {e}")
+    try:
+        gc.collect()
+    except Exception:
+        pass
+    try:
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except Exception:
+        pass
 
 # Attention Backend Selection
 _xformers_available = False
@@ -343,7 +373,20 @@ def image_to_3d(
         with open(metadata_path, 'w') as f:
             json.dump(metadata, f, indent=4)
             
-    torch.cuda.empty_cache()
+    # Make CUDA cache clearing effective by dropping references first.
+    try:
+        del outputs
+    except Exception:
+        pass
+    try:
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except Exception:
+        pass
+    try:
+        gc.collect()
+    except Exception:
+        pass
     return state, actual_video_path
 
 
@@ -400,7 +443,20 @@ def extract_glb(
             print(f"Warning: Metadata file {metadata_path_check} not found for GLB, cannot update stats.")
 
 
-    torch.cuda.empty_cache()
+    try:
+        del gs, mesh, glb_data
+    except Exception:
+        pass
+    try:
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except Exception:
+        pass
+    try:
+        gc.collect()
+    except Exception:
+        pass
+    _unload_pipeline_after_task_if_enabled()
     return actual_glb_path, actual_glb_path
 
 
@@ -431,7 +487,20 @@ def extract_gaussian(
         # Gaussian specific metadata could be added here if needed, similar to GLB
         pass
 
-    torch.cuda.empty_cache()
+    try:
+        del gs
+    except Exception:
+        pass
+    try:
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except Exception:
+        pass
+    try:
+        gc.collect()
+    except Exception:
+        pass
+    _unload_pipeline_after_task_if_enabled()
     return actual_gaussian_path, actual_gaussian_path
 
 
@@ -722,7 +791,7 @@ def perform_generations_and_optional_extractions(
     download_glb_val = gr.update(value=last_glb_path, interactive=bool(last_glb_path)) if extract_models_after_each else gr.update(value=None, interactive=False)
     download_gs_val = gr.update(value=last_gs_path, interactive=bool(last_gs_path)) if extract_models_after_each else gr.update(value=None, interactive=False)
     
-    return (
+    result = (
         last_generated_state, 
         last_video_path,      
         model_to_show_in_ui,  
@@ -732,6 +801,9 @@ def perform_generations_and_optional_extractions(
         enable_extract_buttons, 
         "\n".join(all_outputs_log) 
     )
+
+    _unload_pipeline_after_task_if_enabled()
+    return result
 
 # --- Batch Processing Function ---
 def run_batch_processing(
@@ -913,6 +985,7 @@ def run_batch_processing(
     
     log_output.append(final_msg)
     print(final_msg)
+    _unload_pipeline_after_task_if_enabled()
     yield "\n".join(log_output) # Final yield of all logs
 
 
