@@ -10,6 +10,10 @@ from typing import Optional
 def _candidate_blender_paths() -> list[str]:
     env_path = os.environ.get("BLENDER_PATH")
     if env_path:
+        env_path = os.path.expandvars(os.path.expanduser(env_path))
+        # Accept either a full path to blender(.exe) or a directory containing it.
+        if os.path.isdir(env_path):
+            return [os.path.join(env_path, "blender.exe"), os.path.join(env_path, "blender")]
         return [env_path]
 
     which_path = shutil.which("blender")
@@ -61,6 +65,8 @@ def cleanup_glb_default(
     if not blender_exe:
         print("[WARN] Blender not found. Set BLENDER_PATH or add Blender to PATH to enable default GLB cleanup.")
         return input_glb_path
+
+    print(f"[blender_cleanup] Using Blender: {blender_exe}")
 
     script_path = Path(__file__).parent / "blender_scripts" / "cleanup_glb.py"
     if not script_path.exists():
