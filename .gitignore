@@ -19,6 +19,8 @@ mono_crash.*
 
 gradio_init_done.txt
 trellis_init_done.txt
+patreon_auth.py
+TipicoAI_Launcher.bat
 configs_trellis/
 outputs_trellis/
 assets/T.ply
